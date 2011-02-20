@@ -1,0 +1,15 @@
+Currently under construction, will currently only work on x86 GNU/Linux systems with SSE2 support.
+Due to the beautiful setup of the John the Ripper source code it will be easy to extend this to a multitude of platforms.
+
+I eventually intend to create a Python module to
+#1 - Easily interface with John the Ripper from Python
+#2 - Integrate the DES bit slice technique into DictRipper <https://github.com/crypt3lx2k/DictRipper>
+
+
+Current compiling is done with
+$ gcc bitripper.c john-src/*.[Sc] -O3 -o bitripper -std=c99
+
+And current usage is
+$ ./bitripper tripcode wordlist
+
+But these are extremely likely to change in the very near future.
