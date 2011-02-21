@@ -7,9 +7,15 @@ I eventually intend to create a Python module to
 
 
 Current compiling is done with
-$ gcc bitripper.c john-src/*.[Sc] -O3 -o bitripper -std=c99
+$ cd src/
+$ make
+Follow the instructions from there on.
+I Had to remove DOS support until I could read some docs.
+Something is bound to be broken in the makefile as well since all I did was some very crude and ugly brute surgery, I'll completely rewrite it when I have time.
 
 And current usage is
 $ ./bitripper tripcode wordlist
 
-But these are extremely likely to change in the very near future.
+Again, this is likely to change in the near future, I will probably have some kind of file system with targets and hits.
+
+I'm unsure of how git and github handles symbolic links to files, currently I have every unmodified John the Ripper source file in a seperate directory and just symbolic links to them in the general src/ directory.
