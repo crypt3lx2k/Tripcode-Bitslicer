@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include "john.h"
+#include "bitripper.h"
 
 #define BANK_SIZE 0x1000
 #define KEYS      DES_BS_DEPTH

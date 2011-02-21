@@ -22,9 +22,8 @@ Truls Edvard Stokke <trulses@gmail.com>
 
 	Files belonging to John the Ripper
 
-For any file found in the src/john-src/ directory and any other
-file that originates from John the Ripper the following license
-and conditions apply.
+For any file which originates from John the Ripper
+the following license and conditions apply.
 
 	John the Ripper copyright and license.
 
