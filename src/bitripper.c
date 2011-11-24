@@ -25,11 +25,16 @@ const char * restrict salt =
   "................................"
   "................................";
 
+const char * restrict hidden =
+  "./0123456789"
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+  "abcdefghijklmnopqrstuvwxyz";
+
 int banklen[BANK_SIZE];
 char keybank[BANK_SIZE][KEYS][8];
 ARCH_WORD saltbank[BANK_SIZE];
 
-ARCH_WORD *ciphbin;
+ARCH_WORD ciphbin[64][2];
 
 void run_bank(int banknum) {
   DES_bs_clear_keys();
@@ -38,13 +43,14 @@ void run_bank(int banknum) {
   for (int i = 0; i < banklen[banknum]; i++)
     DES_bs_set_key(keybank[banknum][i], i);
 
-  DES_bs_expand_keys();  
+  DES_bs_expand_keys();
   DES_bs_crypt_25();
 
-  if (DES_bs_cmp_all(ciphbin))
-    for (int i = 0; i < KEYS; i++)
-      if (DES_bs_cmp_one(ciphbin, 32, i))
-	printf("Hit: %s\n", keybank[banknum][i]);
+  for (int i = 0; i < 64; i++)
+    if (DES_bs_cmp_all(ciphbin[i]))
+      for (int j = 0; j < KEYS; j++)
+	if (DES_bs_cmp_one(ciphbin[i], 64, j))
+	  printf("Hit: %s\n", keybank[banknum][j]);
 
   banklen[banknum] = 0;
 
@@ -61,9 +67,18 @@ int main(int argc, char **argv) {
     char ciphertext[14];
 
     memset(ciphertext, 0, 14);
-    strncpy(ciphertext + 3, *++argv, 10);
+    strncpy(ciphertext + 3, *++argv, 11);
 
-    ciphbin = DES_bs_get_binary(ciphertext);
+    memset(ciphertext, '.', 2);
+
+    for (int i = 0; i < 64; i++) {
+      ARCH_WORD * temp;
+      ciphertext[2] = hidden[i];
+
+      temp = DES_bs_get_binary(ciphertext);
+      ciphbin[i][0] = temp[0];
+      ciphbin[i][1] = temp[1];
+    }
   } else {
     exit(EXIT_FAILURE);
   }
@@ -115,13 +130,15 @@ int main(int argc, char **argv) {
 
     index = banklen[hash];
     for (int i = 0; i < 8; i++)
-      keybank[hash][index][i] = iobuf[i] ? iobuf[i] : 0;
+      keybank[hash][index][i] = iobuf[i];
 
     banklen[hash] += 1;
 
     if (banklen[hash] == KEYS) {
       run_bank(hash);
     }
+
+    memset(iobuf, '\0', IOBUF_SIZE);
   }
 
   for (int i = 0; i < BANK_SIZE; i++)
