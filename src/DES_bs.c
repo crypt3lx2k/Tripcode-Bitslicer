@@ -1,6 +1,6 @@
 /*
  * This file is part of John the Ripper password cracker,
- * Copyright (c) 1996-2002,2005,2010 by Solar Designer
+ * Copyright (c) 1996-2002,2005,2010,2011 by Solar Designer
  */
 
 #include <string.h>
@@ -14,7 +14,6 @@
 #define DEPTH				[depth]
 #define START				[0]
 #define init_depth() \
-	int depth; \
 	depth = index >> ARCH_BITS_LOG; \
 	index &= (ARCH_BITS - 1);
 #define for_each_depth() \
@@ -26,7 +25,14 @@
 #define for_each_depth()
 #endif
 
-#if !DES_BS_ASM
+#if DES_bs_mt
+#include <omp.h>
+#include <assert.h>
+int DES_bs_min_kpc, DES_bs_max_kpc;
+static int DES_bs_n_alloc;
+int DES_bs_nt = 0;
+DES_bs_combined *DES_bs_all_p = NULL;
+#elif !DES_BS_ASM
 DES_bs_combined CC_CACHE_ALIGN DES_bs_all;
 #endif
 
@@ -49,300 +55,215 @@ static unsigned char DES_LM_reverse[16] = {
 extern void DES_bs_init_asm(void);
 #endif
 
-void DES_bs_init(int LM)
+void DES_bs_init(int LM, int cpt)
 {
 	ARCH_WORD **k;
 	int round, index, bit;
 	int p, q, s;
 	int c;
+#if DES_bs_mt
+	int t, n;
 
-	DES_bs_all.KS_updates = 0;
-	if (LM)
-		DES_bs_clear_keys_LM();
-	else
-		DES_bs_clear_keys();
-
-#if DES_BS_EXPAND
-	if (LM)
-		k = DES_bs_all.KS.p;
-	else
-		k = DES_bs_all.KSp;
-#else
-	k = DES_bs_all.KS.p;
+/*
+ * The array of DES_bs_all's is not exactly tiny, but we use mem_alloc_tiny()
+ * for its alignment support and error checking.  We do not need to free() this
+ * memory anyway.
+ *
+ * We allocate one extra entry (will be at "thread number" -1) to hold "ones"
+ * and "salt" fields that are shared between threads.
+ */
+	n = omp_get_max_threads();
+	if (n < 1)
+		n = 1;
+	if (n > DES_bs_mt_max)
+		n = DES_bs_mt_max;
+	DES_bs_min_kpc = n * DES_BS_DEPTH;
+	{
+		int max = n * cpt;
+		while (max > DES_bs_mt_max)
+			max -= n;
+		n = max;
+	}
+	DES_bs_max_kpc = n * DES_BS_DEPTH;
+	assert(!DES_bs_all_p || n <= DES_bs_n_alloc);
+	DES_bs_nt = n;
+	if (!DES_bs_all_p) {
+		DES_bs_n_alloc = n;
+		DES_bs_all_p = mem_alloc_tiny(
+		    ++n * DES_bs_all_size, MEM_ALIGN_PAGE);
+	}
 #endif
 
-	s = 0;
-	for (round = 0; round < 16; round++) {
-		s += DES_ROT[round];
-		for (index = 0; index < 48; index++) {
-			p = DES_PC2[index];
-			q = p < 28 ? 0 : 28;
-			p += s;
-			while (p >= 28) p -= 28;
-			bit = DES_PC1[p + q];
-			bit ^= 070;
-			bit -= bit >> 3;
-			bit = 55 - bit;
-			if (LM) bit = DES_LM_KP[bit];
-			*k++ = &DES_bs_all.K[bit] START;
-		}
-	}
-
-/* Initialize the array with right shifts needed to get past the first
- * non-zero bit in the index. */
-	for (bit = 0; bit <= 7; bit++)
-	for (index = 1 << bit; index < 0x100; index += 2 << bit)
-		DES_bs_all.s1[index] = bit + 1;
-
-/* Special case: instead of doing an extra check in *_set_key*(), we
- * might overrun into DES_bs_all.B, which is harmless as long as the
- * order of fields is unchanged.  57 is the smallest value to guarantee
- * we'd be past the end of K[] since we start at -1. */
-	DES_bs_all.s1[0] = 57;
-
-/* The same for second bits */
-	for (index = 0; index < 0x100; index++) {
-		bit = DES_bs_all.s1[index];
-		bit += DES_bs_all.s1[index >> bit];
-		DES_bs_all.s2[index] = (bit <= 8) ? bit : 57;
-	}
-
-/* Convert to byte offsets */
-	for (index = 0; index < 0x100; index++)
-		DES_bs_all.s1[index] *= sizeof(DES_bs_vector);
-
-	if (LM) {
-		for (c = 0; c < 0x100; c++)
-		if (c >= 'a' && c <= 'z')
-			DES_bs_all.E.extras.u[c] = c & ~0x20;
+	for_each_t(n) {
+#if DES_BS_EXPAND
+		if (LM)
+			k = DES_bs_all.KS.p;
 		else
-			DES_bs_all.E.extras.u[c] = c;
+			k = DES_bs_all.KSp;
+#else
+		k = DES_bs_all.KS.p;
+#endif
+
+		s = 0;
+		for (round = 0; round < 16; round++) {
+			s += DES_ROT[round];
+			for (index = 0; index < 48; index++) {
+				p = DES_PC2[index];
+				q = p < 28 ? 0 : 28;
+				p += s;
+				while (p >= 28) p -= 28;
+				bit = DES_PC1[p + q];
+				bit ^= 070;
+				bit -= bit >> 3;
+				bit = 55 - bit;
+				if (LM) bit = DES_LM_KP[bit];
+				*k++ = &DES_bs_all.K[bit] START;
+			}
+		}
+
+/*
+ * Have keys go to bit layers where DES_bs_get_hash() and DES_bs_cmp_one()
+ * currently expect them.
+ */
+		for (index = 0; index < DES_BS_DEPTH; index++)
+			DES_bs_all.pxkeys[index] =
+			    &DES_bs_all.xkeys.c[0][index & 7][index >> 3];
+
+		if (LM) {
+			for (c = 0; c < 0x100; c++)
+			if (c >= 'a' && c <= 'z')
+				DES_bs_all.E.u[c] = c & ~0x20;
+			else
+				DES_bs_all.E.u[c] = c;
+		} else {
+			for (index = 0; index < 48; index++)
+				DES_bs_all.Ens[index] =
+				    &DES_bs_all.B[DES_E[index]];
+			DES_bs_all.salt = 0xffffff;
+#if DES_bs_mt
+			DES_bs_set_salt_for_thread(t, 0);
+#else
+			DES_bs_set_salt(0);
+#endif
+		}
+
+#if !DES_BS_ASM
+		memset(&DES_bs_all.zero, 0, sizeof(DES_bs_all.zero));
+		memset(&DES_bs_all.ones, -1, sizeof(DES_bs_all.ones));
+		for (bit = 0; bit < 8; bit++)
+			memset(&DES_bs_all.masks[bit], 1 << bit,
+			    sizeof(DES_bs_all.masks[bit]));
+#endif
 	}
+
+#if DES_bs_mt
+/* Skip the special entry (will be at "thread number" -1) */
+	if (n > DES_bs_nt)
+		DES_bs_all_p = (DES_bs_combined *)
+		    ((char *)DES_bs_all_p + DES_bs_all_size);
+#endif
 
 #if DES_BS_ASM
 	DES_bs_init_asm();
-#elif defined(__MMX__) || defined(__SSE2__)
-	memset(&DES_bs_all.ones, -1, sizeof(DES_bs_all.ones));
 #endif
 }
 
+#if DES_bs_mt
 void DES_bs_set_salt(ARCH_WORD salt)
 {
-	ARCH_WORD mask;
-	int src, dst;
-
-	mask = 1;
-	for (dst = 0; dst < 48; dst++) {
-		if (dst == 24) mask = 1;
-
-		if (salt & mask) {
-			if (dst < 24) src = dst + 24; else src = dst - 24;
-		} else src = dst;
-
-		DES_bs_all.E.E[dst] = &DES_bs_all.B[DES_E[src]] START;
-		DES_bs_all.E.E[dst + 48] = &DES_bs_all.B[DES_E[src] + 32] START;
-
-		mask <<= 1;
-	}
+	DES_bs_all_by_tnum(-1).salt = salt;
 }
-
-void DES_bs_clear_keys(void)
-{
-	if (DES_bs_all.KS_updates++ & 0xFFF) return;
-	DES_bs_all.KS_updates = 1;
-	memset(DES_bs_all.K, 0, sizeof(DES_bs_all.K));
-	memset(DES_bs_all.keys, 0, sizeof(DES_bs_all.keys));
-	DES_bs_all.keys_changed = 1;
-}
-
-void DES_bs_clear_keys_LM(void)
-{
-	if (DES_bs_all.KS_updates++ & 0xFFF) return;
-	DES_bs_all.KS_updates = 1;
-	memset(DES_bs_all.K, 0, sizeof(DES_bs_all.K));
-#if !DES_BS_VECTOR && ARCH_BITS >= 64
-	memset(DES_bs_all.E.extras.keys, 0, sizeof(DES_bs_all.E.extras.keys));
-#else
-	memset(DES_bs_all.keys, 0, sizeof(DES_bs_all.keys));
 #endif
-}
 
 void DES_bs_set_key(char *key, int index)
 {
-/* new is NUL-terminated, but not NUL-padded to any length;
- * old is NUL-padded to 8 characters, but not always NUL-terminated. */
-	unsigned char *new = (unsigned char *)key;
-	unsigned char *old = DES_bs_all.keys[index];
-	DES_bs_vector *k, *kbase;
-	ARCH_WORD mask;
-	unsigned int xor, s1, s2;
+	unsigned char *dst;
 
-	init_depth();
+	init_t();
 
-	mask = (ARCH_WORD)1 << index;
-	k = (DES_bs_vector *)&DES_bs_all.K[0] DEPTH - 1;
-#if ARCH_ALLOWS_UNALIGNED
-	if (*(ARCH_WORD_32 *)new == *(ARCH_WORD_32 *)old &&
-	    old[sizeof(ARCH_WORD_32)]) {
-		new += sizeof(ARCH_WORD_32);
-		old += sizeof(ARCH_WORD_32);
-		k += sizeof(ARCH_WORD_32) * 7;
-	}
-#endif
-	while (*new && k < &DES_bs_all.K[55]) {
-		kbase = k;
-		if ((xor = *new ^ *old)) {
-			xor &= 0x7F; /* Note: this might result in xor == 0 */
-			*old = *new;
-			do {
-				s1 = DES_bs_all.s1[xor];
-				s2 = DES_bs_all.s2[xor];
-				*(ARCH_WORD *)((char *)k + s1) ^= mask;
-				if (s2 > 8) break; /* Required for xor == 0 */
-				xor >>= s2;
-				k[s2] START ^= mask;
-				k += s2;
-				if (!xor) break;
-				s1 = DES_bs_all.s1[xor];
-				s2 = DES_bs_all.s2[xor];
-				xor >>= s2;
-				*(ARCH_WORD *)((char *)k + s1) ^= mask;
-				k[s2] START ^= mask;
-				k += s2;
-			} while (xor);
-		}
-
-		new++;
-		old++;
-		k = kbase + 7;
-	}
-
-	while (*old && k < &DES_bs_all.K[55]) {
-		kbase = k;
-		xor = *old & 0x7F; /* Note: this might result in xor == 0 */
-		*old++ = 0;
-		do {
-			s1 = DES_bs_all.s1[xor];
-			s2 = DES_bs_all.s2[xor];
-			*(ARCH_WORD *)((char *)k + s1) ^= mask;
-			if (s2 > 8) break; /* Required for xor == 0 */
-			xor >>= s2;
-			k[s2] START ^= mask;
-			k += s2;
-			if (!xor) break;
-			s1 = DES_bs_all.s1[xor];
-			s2 = DES_bs_all.s2[xor];
-			xor >>= s2;
-			*(ARCH_WORD *)((char *)k + s1) ^= mask;
-			k[s2] START ^= mask;
-			k += s2;
-		} while (xor);
-
-		k = kbase + 7;
-	}
+	dst = DES_bs_all.pxkeys[index];
 
 	DES_bs_all.keys_changed = 1;
+
+	if (!key[0]) goto fill8;
+	*dst = key[0];
+	*(dst + sizeof(DES_bs_vector) * 8) = key[1];
+	*(dst + sizeof(DES_bs_vector) * 8 * 2) = key[2];
+	if (!key[1]) goto fill6;
+	if (!key[2]) goto fill5;
+	*(dst + sizeof(DES_bs_vector) * 8 * 3) = key[3];
+	*(dst + sizeof(DES_bs_vector) * 8 * 4) = key[4];
+	if (!key[3]) goto fill4;
+	if (!key[4] || !key[5]) goto fill3;
+	*(dst + sizeof(DES_bs_vector) * 8 * 5) = key[5];
+	if (!key[6]) goto fill2;
+	*(dst + sizeof(DES_bs_vector) * 8 * 6) = key[6];
+	*(dst + sizeof(DES_bs_vector) * 8 * 7) = key[7];
+	return;
+fill8:
+	dst[0] = 0;
+	dst[sizeof(DES_bs_vector) * 8] = 0;
+fill6:
+	dst[sizeof(DES_bs_vector) * 8 * 2] = 0;
+fill5:
+	dst[sizeof(DES_bs_vector) * 8 * 3] = 0;
+fill4:
+	dst[sizeof(DES_bs_vector) * 8 * 4] = 0;
+fill3:
+	dst[sizeof(DES_bs_vector) * 8 * 5] = 0;
+fill2:
+	dst[sizeof(DES_bs_vector) * 8 * 6] = 0;
+	dst[sizeof(DES_bs_vector) * 8 * 7] = 0;
 }
 
 void DES_bs_set_key_LM(char *key, int index)
 {
-/* new is NUL-terminated, but not NUL-padded to any length;
- * old is NUL-padded to 7 characters and NUL-terminated. */
-	unsigned char *new = (unsigned char *)key;
-#if !DES_BS_VECTOR && ARCH_BITS >= 64
-	unsigned char *old = DES_bs_all.E.extras.keys[index];
-#else
-	unsigned char *old = DES_bs_all.keys[index];
-#endif
-	DES_bs_vector *k, *kbase;
-	ARCH_WORD mask;
-	unsigned int xor, s1, s2;
-	unsigned char plain;
+	unsigned long c;
+	unsigned char *dst;
 
-	init_depth();
+	init_t();
 
-	mask = (ARCH_WORD)1 << index;
-	k = (DES_bs_vector *)&DES_bs_all.K[0] DEPTH - 1;
-#if ARCH_ALLOWS_UNALIGNED
-	if (*(ARCH_WORD_32 *)new == *(ARCH_WORD_32 *)old &&
-	    old[sizeof(ARCH_WORD_32)]) {
-		new += sizeof(ARCH_WORD_32);
-		old += sizeof(ARCH_WORD_32);
-		k += sizeof(ARCH_WORD_32) * 8;
-	}
-#endif
-	while (*new && k < &DES_bs_all.K[55]) {
-		plain = DES_bs_all.E.extras.u[ARCH_INDEX(*new)];
-		kbase = k;
-		if ((xor = plain ^ *old)) {
-			*old = plain;
-			do {
-				s1 = DES_bs_all.s1[xor];
-				s2 = DES_bs_all.s2[xor];
-				xor >>= s2;
-				*(ARCH_WORD *)((char *)k + s1) ^= mask;
-				k[s2] START ^= mask;
-				k += s2;
-				if (!xor) break;
-				s1 = DES_bs_all.s1[xor];
-				s2 = DES_bs_all.s2[xor];
-				xor >>= s2;
-				*(ARCH_WORD *)((char *)k + s1) ^= mask;
-				k[s2] START ^= mask;
-				k += s2;
-			} while (xor);
-		}
+	dst = DES_bs_all.pxkeys[index];
 
-		new++;
-		old++;
-		k = kbase + 8;
-	}
-
-	while (*old) {
-		kbase = k;
-		xor = *old;
-		*old++ = 0;
-		do {
-			s1 = DES_bs_all.s1[xor];
-			s2 = DES_bs_all.s2[xor];
-			xor >>= s2;
-			*(ARCH_WORD *)((char *)k + s1) ^= mask;
-			k[s2] START ^= mask;
-			k += s2;
-			if (!xor) break;
-			s1 = DES_bs_all.s1[xor];
-			s2 = DES_bs_all.s2[xor];
-			xor >>= s2;
-			*(ARCH_WORD *)((char *)k + s1) ^= mask;
-			k[s2] START ^= mask;
-			k += s2;
-		} while (xor);
-
-		k = kbase + 8;
-	}
+/*
+ * gcc 4.5.0 on x86_64 would generate redundant movzbl's without explicit
+ * use of "long" here.
+ */
+	c = (unsigned char)key[0];
+	if (!c) goto fill7;
+	*dst = DES_bs_all.E.u[c];
+	c = (unsigned char)key[1];
+	if (!c) goto fill6;
+	*(dst + sizeof(DES_bs_vector) * 8) = DES_bs_all.E.u[c];
+	c = (unsigned char)key[2];
+	if (!c) goto fill5;
+	*(dst + sizeof(DES_bs_vector) * 8 * 2) = DES_bs_all.E.u[c];
+	c = (unsigned char)key[3];
+	if (!c) goto fill4;
+	*(dst + sizeof(DES_bs_vector) * 8 * 3) = DES_bs_all.E.u[c];
+	c = (unsigned char)key[4];
+	if (!c) goto fill3;
+	*(dst + sizeof(DES_bs_vector) * 8 * 4) = DES_bs_all.E.u[c];
+	c = (unsigned char)key[5];
+	if (!c) goto fill2;
+	*(dst + sizeof(DES_bs_vector) * 8 * 5) = DES_bs_all.E.u[c];
+	c = (unsigned char)key[6];
+	*(dst + sizeof(DES_bs_vector) * 8 * 6) = DES_bs_all.E.u[c];
+	return;
+fill7:
+	dst[0] = 0;
+fill6:
+	dst[sizeof(DES_bs_vector) * 8] = 0;
+fill5:
+	dst[sizeof(DES_bs_vector) * 8 * 2] = 0;
+fill4:
+	dst[sizeof(DES_bs_vector) * 8 * 3] = 0;
+fill3:
+	dst[sizeof(DES_bs_vector) * 8 * 4] = 0;
+fill2:
+	dst[sizeof(DES_bs_vector) * 8 * 5] = 0;
+	dst[sizeof(DES_bs_vector) * 8 * 6] = 0;
 }
-
-#if DES_BS_EXPAND
-void DES_bs_expand_keys(void)
-{
-	int index;
-#if DES_BS_VECTOR
-	int depth;
-#endif
-
-	if (!DES_bs_all.keys_changed) return;
-
-	for (index = 0; index < 0x300; index++)
-	for_each_depth()
-#if DES_BS_VECTOR
-		DES_bs_all.KS.v[index] DEPTH = DES_bs_all.KSp[index] DEPTH;
-#else
-		DES_bs_all.KS.v[index] = *DES_bs_all.KSp[index];
-#endif
-
-	DES_bs_all.keys_changed = 0;
-}
-#endif
 
 static ARCH_WORD *DES_bs_get_binary_raw(ARCH_WORD *raw, int count)
 {
@@ -381,60 +302,134 @@ ARCH_WORD *DES_bs_get_binary_LM(char *ciphertext)
 	return DES_bs_get_binary_raw(DES_do_IP(block), 1);
 }
 
-int DES_bs_get_hash(int index, int count)
+static MAYBE_INLINE int DES_bs_get_hash(int index, int count)
 {
 	int result;
 	DES_bs_vector *b;
+#if !ARCH_LITTLE_ENDIAN || DES_BS_VECTOR
+	int depth;
+#endif
 
+	init_t();
+
+#if ARCH_LITTLE_ENDIAN
+/*
+ * This is merely an optimization.  Nothing will break if this check for
+ * little-endian archs is removed, even if the arch is in fact little-endian.
+ */
 	init_depth();
 	b = (DES_bs_vector *)&DES_bs_all.B[0] DEPTH;
+#define GET_BIT(bit) \
+	(((unsigned ARCH_WORD)b[(bit)] START >> index) & 1)
+#else
+	depth = index >> 3;
+	index &= 7;
+	b = (DES_bs_vector *)((unsigned char *)&DES_bs_all.B[0] START + depth);
+#define GET_BIT(bit) \
+	(((unsigned int)*(unsigned char *)&b[(bit)] START >> index) & 1)
+#endif
+#define MOVE_BIT(bit) \
+	(GET_BIT(bit) << (bit))
 
-	result = (b[0] START >> index) & 1;
-	result |= ((b[1] START >> index) & 1) << 1;
-	result |= ((b[2] START >> index) & 1) << 2;
-	result |= ((b[3] START >> index) & 1) << 3;
+	result = GET_BIT(0);
+	result |= MOVE_BIT(1);
+	result |= MOVE_BIT(2);
+	result |= MOVE_BIT(3);
 	if (count == 4) return result;
 
-	result |= ((b[4] START >> index) & 1) << 4;
-	result |= ((b[5] START >> index) & 1) << 5;
-	result |= ((b[6] START >> index) & 1) << 6;
-	result |= ((b[7] START >> index) & 1) << 7;
+	result |= MOVE_BIT(4);
+	result |= MOVE_BIT(5);
+	result |= MOVE_BIT(6);
+	result |= MOVE_BIT(7);
 	if (count == 8) return result;
 
-	result |= ((b[8] START >> index) & 1) << 8;
-	result |= ((b[9] START >> index) & 1) << 9;
-	result |= ((b[10] START >> index) & 1) << 10;
-	result |= ((b[11] START >> index) & 1) << 11;
+	result |= MOVE_BIT(8);
+	result |= MOVE_BIT(9);
+	result |= MOVE_BIT(10);
+	result |= MOVE_BIT(11);
 	if (count == 12) return result;
 
-	result |= ((b[12] START >> index) & 1) << 12;
-	result |= ((b[13] START >> index) & 1) << 13;
-	result |= ((b[14] START >> index) & 1) << 14;
-	result |= ((b[15] START >> index) & 1) << 15;
+	result |= MOVE_BIT(12);
+	result |= MOVE_BIT(13);
+	result |= MOVE_BIT(14);
+	result |= MOVE_BIT(15);
 	if (count == 16) return result;
 
-	result |= ((b[16] START >> index) & 1) << 16;
-	result |= ((b[17] START >> index) & 1) << 17;
-	result |= ((b[18] START >> index) & 1) << 18;
-	result |= ((b[19] START >> index) & 1) << 19;
+	result |= MOVE_BIT(16);
+	result |= MOVE_BIT(17);
+	result |= MOVE_BIT(18);
+	result |= MOVE_BIT(19);
+	if (count == 20) return result;
+
+	result |= MOVE_BIT(20);
+	result |= MOVE_BIT(21);
+	result |= MOVE_BIT(22);
+	result |= MOVE_BIT(23);
+	if (count == 24) return result;
+
+	result |= MOVE_BIT(24);
+	result |= MOVE_BIT(25);
+	result |= MOVE_BIT(26);
+
+#undef GET_BIT
+#undef MOVE_BIT
 
 	return result;
 }
 
+int DES_bs_get_hash_0(int index)
+{
+	return DES_bs_get_hash(index, 4);
+}
+
+int DES_bs_get_hash_1(int index)
+{
+	return DES_bs_get_hash(index, 8);
+}
+
+int DES_bs_get_hash_2(int index)
+{
+	return DES_bs_get_hash(index, 12);
+}
+
+int DES_bs_get_hash_3(int index)
+{
+	return DES_bs_get_hash(index, 16);
+}
+
+int DES_bs_get_hash_4(int index)
+{
+	return DES_bs_get_hash(index, 20);
+}
+
+int DES_bs_get_hash_5(int index)
+{
+	return DES_bs_get_hash(index, 24);
+}
+
+int DES_bs_get_hash_6(int index)
+{
+	return DES_bs_get_hash(index, 27);
+}
+
 /*
- * The trick I used here allows to compare one ciphertext against all the
- * DES_bs_crypt() outputs in just O(log2(ARCH_BITS)) operations, assuming
- * that DES_BS_VECTOR is 0 or 1. This routine isn't vectorized, yet.
+ * The trick used here allows to compare one ciphertext against all the
+ * DES_bs_crypt*() outputs in just O(log2(ARCH_BITS)) operations, assuming
+ * that DES_BS_VECTOR is 0 or 1. This routine isn't vectorized yet.
  */
-int DES_bs_cmp_all(ARCH_WORD *binary)
+int DES_bs_cmp_all(ARCH_WORD *binary, int count)
 {
 	ARCH_WORD value, mask;
 	int bit;
+	DES_bs_vector *b;
 #if DES_BS_VECTOR
 	int depth;
 #endif
-	DES_bs_vector *b;
+#if DES_bs_mt
+	int t, n = (count + (DES_BS_DEPTH - 1)) / DES_BS_DEPTH;
+#endif
 
+	for_each_t(n)
 	for_each_depth() {
 		value = binary[0];
 		b = (DES_bs_vector *)&DES_bs_all.B[0] DEPTH;
@@ -470,16 +465,27 @@ int DES_bs_cmp_one(ARCH_WORD *binary, int count, int index)
 {
 	int bit;
 	DES_bs_vector *b;
+	int depth;
 
-	init_depth();
-	b = (DES_bs_vector *)&DES_bs_all.B[0] DEPTH;
+	init_t();
+
+	depth = index >> 3;
+	index &= 7;
+
+	b = (DES_bs_vector *)((unsigned char *)&DES_bs_all.B[0] START + depth);
+
+#define GET_BIT \
+	((unsigned ARCH_WORD)*(unsigned char *)&b[0] START >> index)
 
 	for (bit = 0; bit < 31; bit++, b++)
-		if (((b[0] START >> index) ^ (binary[0] >> bit)) & 1) return 0;
+		if ((GET_BIT ^ (binary[0] >> bit)) & 1)
+			return 0;
 
 	for (; bit < count; bit++, b++)
-		if (((b[0] START >> index) ^
-			(binary[bit >> 5] >> (bit & 0x1F))) & 1) return 0;
+		if ((GET_BIT ^ (binary[bit >> 5] >> (bit & 0x1F))) & 1)
+			return 0;
+
+#undef GET_BIT
 
 	return 1;
 }

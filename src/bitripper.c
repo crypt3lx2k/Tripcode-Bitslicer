@@ -6,144 +6,133 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
+
 #include "bitripper.h"
 
-#define BANK_SIZE 0x1000
-#define KEYS      DES_BS_DEPTH
+#define IO_BUFFER_SIZE 128
 
-#define IOBUF_SIZE  32
-#define SALT_SIZE   14
+Box boxes[NUMBER_OF_BOXES];
+ARCH_WORD cipher_binaries[sizeof(hidden)][2];
 
-const char * restrict salt =
-  "................................"
-  ".............../0123456789ABCDEF"
-  "GABCDEFGHIJKLMNOPQRSTUVWXYZabcde"
-  "fabcdefghijklmnopqrstuvwxyz....."
-  "................................"
-  "................................"
-  "................................"
-  "................................";
+static inline void run_box(int hash) {
+  int i, j;
+  int keys = boxes[hash].number_of_keys;
 
-const char * restrict hidden =
-  "./0123456789"
-  "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-  "abcdefghijklmnopqrstuvwxyz";
+  boxes[hash].number_of_keys = 0;
 
-int banklen[BANK_SIZE];
-char keybank[BANK_SIZE][KEYS][8];
-ARCH_WORD saltbank[BANK_SIZE];
+  DES_bs_set_salt(boxes[hash].salt_binary);
 
-ARCH_WORD ciphbin[64][2];
+  for (i = 0; i < keys; i++)
+    DES_bs_set_key(boxes[hash].keys[i], i);
 
-void run_bank(int banknum) {
-  DES_bs_clear_keys();
-  DES_bs_set_salt(saltbank[banknum]);
-  
-  for (int i = 0; i < banklen[banknum]; i++)
-    DES_bs_set_key(keybank[banknum][i], i);
+  DES_bs_crypt_25(keys);
 
-  DES_bs_expand_keys();
-  DES_bs_crypt_25();
+  for (i = 0; i < sizeof(hidden); i++)
+    if (DES_bs_cmp_all(cipher_binaries[i], 32))
+      for (j = 0; j < keys; j++)
+	if (DES_bs_cmp_one(cipher_binaries[i],
+			   2*ARCH_BITS,
+			   j)) {
+	  printf("Hit: %s\n", boxes[hash].keys[j]);
+	  goto end;
+	}
 
-  for (int i = 0; i < 64; i++)
-    if (DES_bs_cmp_all(ciphbin[i]))
-      for (int j = 0; j < KEYS; j++)
-	if (DES_bs_cmp_one(ciphbin[i], 64, j))
-	  printf("Hit: %s\n", keybank[banknum][j]);
-
-  banklen[banknum] = 0;
-
-  return;
+ end:
+  ;
 }
 
-int main(int argc, char **argv) {
-  FILE *infile;
-  int hash, index;
-  char * restrict iobuf;
-  char * restrict saltbuf;
+int main (int argc, char **argv) {
+  char io_buffer[IO_BUFFER_SIZE];
+  char salt[14];
+  FILE * infile;
 
-  if (--argc) {
-    char ciphertext[14];
+  if (argc < 2) {
+    fprintf(stderr,
+	    "usage: %s tripcode wordfile\n",
+	    argv[0]);
+    exit(EXIT_FAILURE);
+  }
+
+  DES_bs_init(0, DES_bs_cpt);
+
+  {
+    int i;
+    char ciphertext [14];
+    ARCH_WORD * binary;
 
     memset(ciphertext, 0, 14);
-    strncpy(ciphertext + 3, *++argv, 11);
+    strncpy(ciphertext + 3, argv[1], 11);
 
-    memset(ciphertext, '.', 2);
-
-    for (int i = 0; i < 64; i++) {
-      ARCH_WORD * temp;
+    for (i = 0; i < sizeof(hidden); i++) {
       ciphertext[2] = hidden[i];
-
-      temp = DES_bs_get_binary(ciphertext);
-      ciphbin[i][0] = temp[0];
-      ciphbin[i][1] = temp[1];
+      binary = DES_bs_get_binary(ciphertext);
+      cipher_binaries[i][0] = binary[0];
+      cipher_binaries[i][1] = binary[1];
     }
-  } else {
-    exit(EXIT_FAILURE);
   }
 
-  DES_bs_init(0);
+  {
+    infile = fopen(argv[2], "r");
 
-  iobuf   = calloc(sizeof(char), IOBUF_SIZE);
-  saltbuf = calloc(sizeof(char),  SALT_SIZE);
-
-  if (--argc)
-    infile = fopen(*++argv, "r");
-  else
-    exit(EXIT_FAILURE);
-
-  if (infile == NULL) {
-    fprintf(stderr, "Unable to open file.\n");
-    exit(EXIT_FAILURE);
+    if (infile == NULL) {
+      fprintf(stderr,
+	      "unable to open file %s\n",
+	      argv[2]);
+      exit(EXIT_FAILURE);
+    }
   }
 
-  while (fgets(iobuf, IOBUF_SIZE, infile)) {
-    size_t iolen;
+  memset(io_buffer, '\0', IO_BUFFER_SIZE);
+  memset(salt,      '\0', 14);
 
-    if (iobuf[0] == '#')
-      continue;
+  while (fgets(io_buffer, IO_BUFFER_SIZE, infile)) {
+    int i;
+    int hash;
+    int index;
+    size_t input_length;
 
-    memset(saltbuf, 'H', 2);
+    memset(salt, 'H', 2);
 
-    iolen = strlen(iobuf);
+    input_length = strlen(io_buffer);
 
-    if (iobuf[iolen - 1] == '\n')
-      iobuf[--iolen] = '\0';
+    if (io_buffer[input_length - 1] == '\n')
+      io_buffer[--input_length] = '\0';
 
-    switch (iolen) {
+    switch (input_length) {
     case 1:
-      saltbuf[1] = '.';
+      salt[1] = '.';
       break;
     default:
-      saltbuf[1] = salt[(unsigned char) iobuf[2]];
+      salt[1] = salt_table[(unsigned char) io_buffer[2]];
     case 2:
-      saltbuf[0] = salt[(unsigned char) iobuf[1]];
+      salt[0] = salt_table[(unsigned char) io_buffer[1]];
       break;
     }
 
-    hash  = (saltbuf[0] & 0x3f);
-    hash |= (saltbuf[1] & 0x3f) << 6;
+    SALT_HASH(hash, salt);
 
-    if (!saltbank[hash])
-      saltbank[hash] = DES_raw_get_salt(saltbuf);
+    if (!boxes[hash].salt_binary)
+      boxes[hash].salt_binary = DES_raw_get_salt(salt);
 
-    index = banklen[hash];
-    for (int i = 0; i < 8; i++)
-      keybank[hash][index][i] = iobuf[i];
+    index = boxes[hash].number_of_keys;
+    for (i = 0; i < 8; i++)
+      boxes[hash].keys[index][i] = io_buffer[i];
 
-    banklen[hash] += 1;
+    boxes[hash].number_of_keys += 1;
 
-    if (banklen[hash] == KEYS) {
-      run_bank(hash);
-    }
+    if (boxes[hash].number_of_keys == KEYS_PER_BOX)
+      run_box(hash);
 
-    memset(iobuf, '\0', IOBUF_SIZE);
+    memset(io_buffer, '\0', IO_BUFFER_SIZE);
   }
 
-  for (int i = 0; i < BANK_SIZE; i++)
-    if (banklen[i])
-      run_bank(i);
+  {
+    int i;
+
+    for (i = 0; i < NUMBER_OF_BOXES; i++)
+      if (boxes[i].number_of_keys)
+	run_box(i);
+  }
 
   exit(EXIT_SUCCESS);
 }

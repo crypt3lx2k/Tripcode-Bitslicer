@@ -1,12 +1,6 @@
 #
 # This file is part of John the Ripper password cracker,
-# Copyright (c) 1996-2010 by Solar Designer
-#
-# Modified by Truls Edvard Stokke for BitRipper imageboard
-# tripcode cracker.
-#
-# See LICENSE file for details regarding files originating
-# from John the Ripper.
+# Copyright (c) 1996-2011 by Solar Designer
 #
 
 CC = gcc
@@ -23,29 +17,37 @@ CPPFLAGS = -E
 OMPFLAGS =
 # gcc with OpenMP
 #OMPFLAGS = -fopenmp
+#OMPFLAGS = -fopenmp -msse2
 # Sun Studio with OpenMP (set the OMP_NUM_THREADS env var at runtime)
 #OMPFLAGS = -xopenmp
-CFLAGS = -c -Wall -O2 -fomit-frame-pointer $(OMPFLAGS) -std=c99
+CFLAGS = -c -Wall -O2 -fomit-frame-pointer $(OMPFLAGS)
+# CFLAGS for use on the main john.c file only
+CFLAGS_MAIN = $(CFLAGS)
 ASFLAGS = -c $(OMPFLAGS)
 LDFLAGS = -s $(OMPFLAGS)
 OPT_NORMAL = -funroll-loops
-OPT_INLINE = -finline-functions
+# Remove the "-Os" if you're using an ancient version of gcc
+OPT_INLINE = -Os -funroll-loops -finline-functions
 
-BIT_OBJS = bitripper.o DES_std.o DES_bs.o DES_bs_b.o common.o
+BITRIPPER_OBJS = bitripper.o DES_std.o DES_bs.o DES_bs_b.o common.o memory.o
 
 PROJ = ../bitripper
 PROJ_WIN32 = ../bitripper.exe
 
 default:
-	@echo "To build BitRipper, type:"
+	@echo "To build bitripper, type:"
 	@echo "	make clean SYSTEM"
 	@echo "where SYSTEM can be one of the following:"
-	@echo "linux-x86-64             Linux, x86-64 with SSE2 (best)"
+	@echo "linux-x86-64-avx         Linux, x86-64 with AVX (2011+ Intel CPUs)"
+	@echo "linux-x86-64-xop         Linux, x86-64 with AVX and XOP (2011+ AMD CPUs)"
+	@echo "linux-x86-64             Linux, x86-64 with SSE2 (most common)"
 #	@echo "linux-x86-64-32-sse2     Linux, x86-64, 32-bit with SSE2"
 #	@echo "linux-x86-64-32-mmx      Linux, x86-64, 32-bit with MMX"
-	@echo "linux-x86-sse2           Linux, x86 with SSE2 (best if 32-bit)"
-	@echo "linux-x86-mmx            Linux, x86 with MMX"
-	@echo "linux-x86-any            Linux, x86"
+	@echo "linux-x86-avx            Linux, x86 32-bit with AVX (2011+ Intel CPUs)"
+	@echo "linux-x86-xop            Linux, x86 32-bit with AVX and XOP (2011+ AMD CPUs)"
+	@echo "linux-x86-sse2           Linux, x86 32-bit with SSE2 (most common, if 32-bit)"
+	@echo "linux-x86-mmx            Linux, x86 32-bit with MMX (for old computers)"
+	@echo "linux-x86-any            Linux, x86 32-bit (for truly ancient computers)"
 	@echo "linux-alpha              Linux, Alpha"
 	@echo "linux-sparc              Linux, SPARC 32-bit"
 	@echo "linux-ppc32-altivec      Linux, PowerPC w/AltiVec (best)"
@@ -94,29 +96,51 @@ default:
 	@echo "macosx-ppc32             Mac OS X, PowerPC 32-bit"
 #	@echo "macosx-ppc64-altivec     Mac OS X, PowerPC 64-bit w/AltiVec"
 	@echo "macosx-ppc64             Mac OS X 10.4+, PowerPC 64-bit"
+	@echo "macosx-universal         Mac OS X, Universal Binary (x86 + x86-64 + PPC)"
 	@echo "hpux-pa-risc-gcc         HP-UX, PA-RISC, gcc"
 	@echo "hpux-pa-risc-cc          HP-UX, PA-RISC, ANSI cc"
 	@echo "irix-mips64-r10k         IRIX, MIPS 64-bit (R10K) (best)"
 	@echo "irix-mips64              IRIX, MIPS 64-bit"
 	@echo "irix-mips32              IRIX, MIPS 32-bit"
+	@echo "dos-djgpp-x86-mmx        DOS, DJGPP, x86 with MMX"
+	@echo "dos-djgpp-x86-any        DOS, DJGPP, x86"
 	@echo "win32-cygwin-x86-sse2    Win32, Cygwin, x86 with SSE2 (best)"
 	@echo "win32-cygwin-x86-mmx     Win32, Cygwin, x86 with MMX"
 	@echo "win32-cygwin-x86-any     Win32, Cygwin, x86"
 	@echo "beos-x86-sse2            BeOS, x86 with SSE2 (best)"
 	@echo "beos-x86-mmx             BeOS, x86 with MMX"
 	@echo "beos-x86-any             BeOS, x86"
+	@echo "generic                  Any other Unix-like system with gcc"
+
+linux-x86-64-avx:
+	$(LN) x86-64.h arch.h
+	$(MAKE) $(PROJ) \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86-64.o" \
+		CFLAGS_MAIN="$(CFLAGS) -DJOHN_AVX -DHAVE_CRYPT" \
+		CFLAGS="$(CFLAGS) -mavx -DHAVE_CRYPT" \
+		ASFLAGS="$(ASFLAGS) -mavx" \
+		LDFLAGS="$(LDFLAGS) -lcrypt"
+
+linux-x86-64-xop:
+	$(LN) x86-64.h arch.h
+	$(MAKE) $(PROJ) \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86-64.o" \
+		CFLAGS_MAIN="$(CFLAGS) -DJOHN_XOP -DHAVE_CRYPT" \
+		CFLAGS="$(CFLAGS) -mxop -DHAVE_CRYPT" \
+		ASFLAGS="$(ASFLAGS) -mxop" \
+		LDFLAGS="$(LDFLAGS) -lcrypt"
 
 linux-x86-64:
 	$(LN) x86-64.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS)  x86-64.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86-64.o" \
 		CFLAGS="$(CFLAGS) -DHAVE_CRYPT" \
 		LDFLAGS="$(LDFLAGS) -lcrypt"
 
 linux-x86-64-32-sse2:
 	$(LN) x86-sse.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS)  x86.o x86-sse.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o x86-sse.o" \
 		CFLAGS="$(CFLAGS) -m32 -DHAVE_CRYPT" \
 		ASFLAGS="$(ASFLAGS) -m32" \
 		LDFLAGS="$(LDFLAGS) -m32 -lcrypt"
@@ -124,36 +148,54 @@ linux-x86-64-32-sse2:
 linux-x86-64-32-mmx:
 	$(LN) x86-mmx.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS)  x86.o x86-mmx.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o x86-mmx.o" \
 		CFLAGS="$(CFLAGS) -m32 -DHAVE_CRYPT" \
 		ASFLAGS="$(ASFLAGS) -m32" \
+		LDFLAGS="$(LDFLAGS) -m32 -lcrypt"
+
+linux-x86-avx:
+	$(LN) x86-sse.h arch.h
+	$(MAKE) $(PROJ) \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o" \
+		CFLAGS_MAIN="$(CFLAGS) -m32 -DJOHN_AVX -DHAVE_CRYPT" \
+		CFLAGS="$(CFLAGS) -m32 -mavx -DHAVE_CRYPT" \
+		ASFLAGS="$(ASFLAGS) -m32 -mavx" \
+		LDFLAGS="$(LDFLAGS) -m32 -lcrypt"
+
+linux-x86-xop:
+	$(LN) x86-sse.h arch.h
+	$(MAKE) $(PROJ) \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o" \
+		CFLAGS_MAIN="$(CFLAGS) -m32 -DJOHN_XOP -DHAVE_CRYPT" \
+		CFLAGS="$(CFLAGS) -m32 -mxop -DHAVE_CRYPT" \
+		ASFLAGS="$(ASFLAGS) -m32 -mxop" \
 		LDFLAGS="$(LDFLAGS) -m32 -lcrypt"
 
 linux-x86-sse2:
 	$(LN) x86-sse.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS)  x86.o x86-sse.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o x86-sse.o" \
 		CFLAGS="$(CFLAGS) -DHAVE_CRYPT" \
 		LDFLAGS="$(LDFLAGS) -lcrypt"
 
 linux-x86-mmx:
 	$(LN) x86-mmx.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS)  x86.o x86-mmx.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o x86-mmx.o" \
 		CFLAGS="$(CFLAGS) -DHAVE_CRYPT" \
 		LDFLAGS="$(LDFLAGS) -lcrypt"
 
 linux-x86-any:
 	$(LN) x86-any.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS)  x86.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o" \
 		CFLAGS="$(CFLAGS) -DHAVE_CRYPT" \
 		LDFLAGS="$(LDFLAGS) -lcrypt"
 
 linux-alpha:
 	$(LN) alpha.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS)  alpha.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) alpha.o" \
 		CFLAGS="$(CFLAGS) -DHAVE_CRYPT" \
 		LDFLAGS="$(LDFLAGS) -lcrypt"
 
@@ -162,7 +204,7 @@ linux-alpha:
 linux-alpha-ccc:
 	$(LN) alpha.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS)  alpha.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) alpha.o" \
 		CC=ccc \
 		CFLAGS="-c -Wf,-switch,noil_schedule -DHAVE_CRYPT" \
 		LDFLAGS="$(LDFLAGS) -lcrypt" \
@@ -172,14 +214,14 @@ linux-alpha-ccc:
 linux-sparc:
 	$(LN) sparc32.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) " \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS)" \
 		CFLAGS="$(CFLAGS) -DHAVE_CRYPT" \
 		LDFLAGS="$(LDFLAGS) -lcrypt"
 
 linux-ppc32-altivec:
 	$(LN) ppc32alt.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) " \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS)" \
 		CFLAGS="$(CFLAGS) -DHAVE_CRYPT" \
 		LDFLAGS="$(LDFLAGS) -lcrypt" \
 		OPT_INLINE="-finline-functions -finline-limit=4000 -maltivec"
@@ -187,7 +229,7 @@ linux-ppc32-altivec:
 linux-ppc32:
 	$(LN) ppc32.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) " \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS)" \
 		CFLAGS="$(CFLAGS) -DHAVE_CRYPT" \
 		LDFLAGS="$(LDFLAGS) -lcrypt"
 
@@ -195,7 +237,7 @@ linux-ppc32:
 linux-ppc64-altivec:
 	$(LN) ppc64alt.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) " \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS)" \
 		CFLAGS="$(CFLAGS) -m64 -DHAVE_CRYPT" \
 		LDFLAGS="$(LDFLAGS) -m64 -lcrypt" \
 		OPT_INLINE="-finline-functions -finline-limit=4000 -maltivec"
@@ -203,7 +245,7 @@ linux-ppc64-altivec:
 linux-ppc64:
 	$(LN) ppc64.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) " \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS)" \
 		CFLAGS="$(CFLAGS) -m64 -DHAVE_CRYPT" \
 		LDFLAGS="$(LDFLAGS) -m64 -lcrypt" \
 		OPT_INLINE="-finline-functions -finline-limit=4000"
@@ -211,77 +253,77 @@ linux-ppc64:
 linux-ia64:
 	$(LN) ia64.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) " \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS)" \
 		CFLAGS="$(CFLAGS) -DHAVE_CRYPT" \
 		LDFLAGS="$(LDFLAGS) -lcrypt"
 
 freebsd-x86-64:
 	$(LN) x86-64.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) x86-64.o"
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86-64.o"
 
 freebsd-x86-sse2:
 	$(LN) x86-sse.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) x86.o x86-sse.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o x86-sse.o" \
 		ASFLAGS="$(ASFLAGS) -DBSD"
 
 freebsd-x86-mmx:
 	$(LN) x86-mmx.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) x86.o x86-mmx.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o x86-mmx.o" \
 		ASFLAGS="$(ASFLAGS) -DBSD"
 
 freebsd-x86-any:
 	$(LN) x86-any.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) x86.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o" \
 		ASFLAGS="$(ASFLAGS) -DBSD"
 
 freebsd-x86-any-a.out:
 	$(LN) x86-any.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) x86.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o" \
 		ASFLAGS="$(ASFLAGS) -DUNDERSCORES -DALIGN_LOG -DBSD"
 
 freebsd-alpha:
 	$(LN) alpha.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) alpha.o"
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) alpha.o"
 
 openbsd-x86-64:
 	$(LN) x86-64.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) x86-64.o"
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86-64.o"
 
 openbsd-x86-sse2:
 	$(LN) x86-sse.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) x86.o x86-sse.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o x86-sse.o" \
 		ASFLAGS="$(ASFLAGS) -DBSD"
 
 openbsd-x86-mmx:
 	$(LN) x86-mmx.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) x86.o x86-mmx.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o x86-mmx.o" \
 		ASFLAGS="$(ASFLAGS) -DBSD"
 
 openbsd-x86-any:
 	$(LN) x86-any.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) x86.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o" \
 		ASFLAGS="$(ASFLAGS) -DBSD"
 
 openbsd-x86-any-a.out:
 	$(LN) x86-any.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) x86.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o" \
 		ASFLAGS="$(ASFLAGS) -DUNDERSCORES -DALIGN_LOG -DBSD"
 
 openbsd-alpha:
 	$(LN) alpha.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) alpha.o"
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) alpha.o"
 
 openbsd-sparc64:
 	$(LN) sparc64.h arch.h
@@ -326,62 +368,62 @@ netbsd-vax:
 solaris-sparc64-cc:
 	$(LN) sparc64.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) " \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS)" \
 		CC=cc \
 		CFLAGS="-c -fast -xarch=native64 -DHAVE_CRYPT $(OMPFLAGS)" \
-		LDFLAGS="-s -xarch=native64 $(OMPFLAGS) -lc -lrt" \
+		LDFLAGS="$(LDFLAGS) -xarch=native64 -lrt" \
 		OPT_NORMAL="" \
 		OPT_INLINE="-xinline=s1,s2,s3,s4,s5,s6,s7,s8"
 
 solaris-sparc64-gcc:
 	$(LN) sparc64.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) " \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS)" \
 		CFLAGS="$(CFLAGS) -m64 -mcpu=ultrasparc -DHAVE_CRYPT" \
 		LDFLAGS="$(LDFLAGS) -m64 -lrt"
 
 solaris-sparcv9-cc:
 	$(LN) sparc32.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) " \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS)" \
 		CC=cc \
 		CFLAGS="-c -xO4 -xarch=v8plusa -xchip=ultra -DHAVE_CRYPT $(OMPFLAGS)" \
-		LDFLAGS="-s $(OMPFLAGS) -lc -lrt" \
+		LDFLAGS="$(LDFLAGS) -lrt" \
 		OPT_NORMAL="" \
 		OPT_INLINE="-xinline=s1,s2,s3,s4,s5,s6,s7,s8"
 
 solaris-sparcv8-cc:
 	$(LN) sparc32.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) " \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS)" \
 		CC=cc \
 		CFLAGS="-c -xO4 -xarch=v8 -DHAVE_CRYPT $(OMPFLAGS)" \
-		LDFLAGS="-s $(OMPFLAGS) -lc -lrt" \
+		LDFLAGS="$(LDFLAGS) -lrt" \
 		OPT_NORMAL="" \
 		OPT_INLINE="-xinline=s1,s2,s3,s4,s5,s6,s7,s8"
 
 solaris-sparc-gcc:
 	$(LN) sparc32.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) " \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS)" \
 		CFLAGS="$(CFLAGS) -DHAVE_CRYPT" \
 		LDFLAGS="$(LDFLAGS) -lrt"
 
 solaris-x86-64-cc:
 	$(LN) x86-64.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS)  x86-64.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86-64.o" \
 		CC=cc \
 		CFLAGS="-c -fast -xarch=native64 -DHAVE_CRYPT $(OMPFLAGS)" \
 		ASFLAGS="-c -xarch=native64 $(OMPFLAGS)" \
-		LDFLAGS="-s -xarch=native64 $(OMPFLAGS) -lrt" \
+		LDFLAGS="$(LDFLAGS) -xarch=native64 -lrt" \
 		OPT_NORMAL="" \
 		OPT_INLINE="-xinline=s1,s2,s3,s4,s5,s6,s7,s8"
 
 solaris-x86-64-gcc:
 	$(LN) x86-64.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS)  x86-64.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86-64.o" \
 		CFLAGS="$(CFLAGS) -m64 -DHAVE_CRYPT" \
 		ASFLAGS="$(CFLAGS) -m64" \
 		LDFLAGS="$(LDFLAGS) -m64 -lrt"
@@ -389,36 +431,36 @@ solaris-x86-64-gcc:
 solaris-x86-sse2-cc:
 	$(LN) x86-sse.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS)  solaris-x86.o x86-sse.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) solaris-x86.o x86-sse.o" \
 		CC=cc \
 		CFLAGS="-c -fast -xarch=native -DHAVE_CRYPT $(OMPFLAGS)" \
 		ASFLAGS="-c -xarch=native $(OMPFLAGS)" \
-		LDFLAGS="-s -xarch=native $(OMPFLAGS) -lrt" \
+		LDFLAGS="$(LDFLAGS) -xarch=native -lrt" \
 		OPT_NORMAL="" \
 		OPT_INLINE="-xinline=s1,s2,s3,s4,s5,s6,s7,s8"
 
 solaris-x86-sse2-gcc:
 	$(LN) x86-sse.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS)  x86.o x86-sse.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) solaris-x86.o x86-sse.o" \
 		CFLAGS="$(CFLAGS) -DHAVE_CRYPT" \
 		LDFLAGS="$(LDFLAGS) -lrt"
 
 solaris-x86-mmx-cc:
 	$(LN) x86-mmx.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS)  solaris-x86.o x86-mmx.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) solaris-x86.o x86-mmx.o" \
 		CC=cc \
 		CFLAGS="-c -fast -xarch=native -DHAVE_CRYPT $(OMPFLAGS)" \
 		ASFLAGS="-c -xarch=native $(OMPFLAGS)" \
-		LDFLAGS="-s -xarch=native $(OMPFLAGS) -lrt" \
+		LDFLAGS="$(LDFLAGS) -xarch=native -lrt" \
 		OPT_NORMAL="" \
 		OPT_INLINE="-xinline=s1,s2,s3,s4,s5,s6,s7,s8"
 
 solaris-x86-mmx-gcc:
 	$(LN) x86-mmx.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS)  x86.o x86-mmx.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) solaris-x86.o x86-mmx.o" \
 		CFLAGS="$(CFLAGS) -DHAVE_CRYPT" \
 		LDFLAGS="$(LDFLAGS) -lrt"
 
@@ -427,11 +469,11 @@ solaris-x86-any-cc:
 	ln -s x86-any.h arch.h
 	$(MAKE) $(PROJ) \
 		SHELL=/bin/sh \
-		BIT_OBJS="$(BIT_OBJS)  solaris-x86.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) solaris-x86.o" \
 		CC=cc \
 		CFLAGS="-c -xO4 -DHAVE_CRYPT $(OMPFLAGS)" \
 		ASFLAGS="-c $(OMPFLAGS)" \
-		LDFLAGS="-s $(OMPFLAGS) -lc -lrt" \
+		LDFLAGS="$(LDFLAGS) -lrt" \
 		OPT_NORMAL="" \
 		OPT_INLINE="-xinline=s1,s2,s3,s4,s5,s6,s7,s8"
 
@@ -440,9 +482,9 @@ solaris-x86-any-gcc:
 	ln -s x86-any.h arch.h
 	$(MAKE) $(PROJ) \
 		SHELL=/bin/sh \
-		BIT_OBJS="$(BIT_OBJS)  solaris-x86.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) solaris-x86.o" \
 		CFLAGS="$(CFLAGS) -DHAVE_CRYPT" \
-		LDFLAGS="$(LDFLAGS) -lc -lrt"
+		LDFLAGS="$(LDFLAGS) -lrt"
 
 # Older versions of Sun's assembler had a line length restriction (and some
 # other problems, which affect newer versions as well and which are worked
@@ -457,14 +499,14 @@ sco-x86-any-gcc:
 	ln -s x86-any.h arch.h
 	$(MAKE) $(PROJ) \
 		SHELL=/bin/sh \
-		BIT_OBJS="$(BIT_OBJS) sco-x86.o"
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) sco-x86.o"
 
 sco-x86-any-cc:
 	$(RM) arch.h
 	ln -s x86-any.h arch.h
 	$(MAKE) $(PROJ) \
 		SHELL=/bin/sh \
-		BIT_OBJS="$(BIT_OBJS) sco-x86.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) sco-x86.o" \
 		CC=cc \
 		CFLAGS="-c -b elf -O3" \
 		ASFLAGS="-c -b elf" \
@@ -481,7 +523,7 @@ sco-x86.o: x86.S
 tru64-alpha:
 	$(LN) alpha.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) digipaq-alpha.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) digipaq-alpha.o" \
 		CC=cc \
 		CFLAGS="-c -O4 -arch host" \
 		OPT_NORMAL="" \
@@ -498,14 +540,14 @@ aix-ppc32:
 	$(MAKE) $(PROJ) \
 		CC=cc \
 		CFLAGS="-c -qunroll=2 -qarch=ppc -qchars=signed" \
-		LDFLAGS="-s -lbsd" \
+		LDFLAGS="$(LDFLAGS) -lbsd" \
 		OPT_NORMAL="-O2" \
 		OPT_INLINE="-O3 -Q=99 -w"
 
 macosx-x86-64:
 	$(LN) x86-64.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) x86-64.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86-64.o" \
 		ASFLAGS="$(ASFLAGS) -m64 -DUNDERSCORES -DBSD -DALIGN_LOG" \
 		CFLAGS="$(CFLAGS) -m64" \
 		LDFLAGS="$(LDFLAGS) -m64"
@@ -513,7 +555,7 @@ macosx-x86-64:
 macosx-x86-sse2:
 	$(LN) x86-sse.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) x86.o x86-sse.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o x86-sse.o" \
 		ASFLAGS="$(ASFLAGS) -m32 -DUNDERSCORES -DBSD -DALIGN_LOG" \
 		CFLAGS="$(CFLAGS) -m32" \
 		LDFLAGS="$(LDFLAGS) -m32"
@@ -521,7 +563,7 @@ macosx-x86-sse2:
 macosx-x86-mmx:
 	$(LN) x86-mmx.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) x86.o x86-mmx.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o x86-mmx.o" \
 		ASFLAGS="$(ASFLAGS) -m32 -DUNDERSCORES -DBSD -DALIGN_LOG" \
 		CFLAGS="$(CFLAGS) -m32" \
 		LDFLAGS="$(LDFLAGS) -m32"
@@ -598,6 +640,41 @@ macosx-ppc64-cross:
 		OPT_NORMAL="-fast" \
 		OPT_INLINE="-fast -finline-limit=4000"
 
+john-macosx-x86-64:
+	$(RM) *.o
+	$(LN) x86-64.h arch.h
+	$(MAKE) $(PROJ) \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86-64.o" \
+		ASFLAGS="$(ASFLAGS) -arch x86_64 -m64 -DUNDERSCORES -DBSD -DALIGN_LOG" \
+		CFLAGS="$(CFLAGS) -arch x86_64 -m64" \
+		LDFLAGS="$(LDFLAGS) -arch x86_64 -m64"
+	mv ../run/john john-macosx-x86-64
+
+john-macosx-x86:
+	$(RM) *.o
+	$(LN) x86-sse.h arch.h
+	$(MAKE) $(PROJ) \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o x86-sse.o" \
+		ASFLAGS="$(ASFLAGS) -arch i386 -m32 -DUNDERSCORES -DBSD -DALIGN_LOG" \
+		CFLAGS="$(CFLAGS) -arch i386 -m32" \
+		LDFLAGS="$(LDFLAGS) -arch i386 -m32"
+	mv ../run/john john-macosx-x86
+
+john-macosx-ppc:
+	$(RM) *.o
+	$(LN) ppc32alt.h arch.h
+	$(MAKE) $(PROJ) \
+		ASFLAGS="$(ASFLAGS) -arch ppc" \
+		CFLAGS="-c -Wall -arch ppc -fomit-frame-pointer" \
+		LDFLAGS="$(LDFLAGS) -arch ppc" \
+		OPT_NORMAL="-fast -mcpu=7450" \
+		OPT_INLINE="-fast -mcpu=7450 -finline-limit=4000 -faltivec -maltivec"
+	mv ../run/john john-macosx-ppc
+
+macosx-universal: john-macosx-x86-64 john-macosx-x86 john-macosx-ppc
+	lipo -create john-macosx-x86-64 john-macosx-x86 john-macosx-ppc \
+		-output ../run/john
+
 hpux-pa-risc-gcc:
 	$(LN) pa-risc.h arch.h
 	$(MAKE) $(PROJ) \
@@ -608,7 +685,6 @@ hpux-pa-risc-cc:
 	$(MAKE) $(PROJ) \
 		CC=cc \
 		CFLAGS="-c -Aa -D_HPUX_SOURCE -DANSI_CPP" \
-		LDFLAGS="-s" \
 		OPT_NORMAL="+O2" \
 		OPT_INLINE="+O3 +Oinline"
 
@@ -617,7 +693,7 @@ irix-mips64-r10k:
 	$(MAKE) $(PROJ) \
 		CC=cc \
 		CFLAGS="-c -O2 -64 -mips4 -r10000 -signed" \
-		LDFLAGS="-s -64 -mips4 -r10000" \
+		LDFLAGS="$(LDFLAGS) -64 -mips4 -r10000" \
 		OPT_NORMAL="-LNO:opt=1 -OPT:Olimit=2194" \
 		OPT_INLINE="-INLINE:all"
 
@@ -626,7 +702,7 @@ irix-mips64:
 	$(MAKE) $(PROJ) \
 		CC=cc \
 		CFLAGS="-c -O2 -64 -mips3 -signed" \
-		LDFLAGS="-s -64 -mips3" \
+		LDFLAGS="$(LDFLAGS) -64 -mips3" \
 		OPT_NORMAL="-LNO:opt=1 -OPT:Olimit=2194" \
 		OPT_INLINE="-INLINE:all"
 
@@ -635,52 +711,66 @@ irix-mips32:
 	$(MAKE) $(PROJ) \
 		CC=cc \
 		CFLAGS="-c -O2 -32 -signed" \
-		LDFLAGS="-s -32" \
+		LDFLAGS="$(LDFLAGS) -32" \
 		OPT_NORMAL="-LNO:opt=1 -OPT:Olimit=2194" \
 		OPT_INLINE="-INLINE:all"
+
+dos-djgpp-x86-mmx:
+	copy x86-mmx.h arch.h
+	$(MAKE) $(PROJ_DOS) \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o x86-mmx.o" \
+		CFLAGS="$(CFLAGS) -mpreferred-stack-boundary=2" \
+		ASFLAGS="$(ASFLAGS) -DUNDERSCORES -DALIGN_LOG"
+
+dos-djgpp-x86-any:
+	copy x86-any.h arch.h
+	$(MAKE) $(PROJ_DOS) \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o" \
+		CFLAGS="$(CFLAGS) -mpreferred-stack-boundary=2" \
+		ASFLAGS="$(ASFLAGS) -DUNDERSCORES -DALIGN_LOG"
 
 win32-cygwin-x86-sse2:
 	$(CP) x86-sse.h arch.h
 	$(MAKE) $(PROJ_WIN32) \
-		BIT_OBJS="$(BIT_OBJS) x86.o x86-sse.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o x86-sse.o" \
 		CFLAGS="$(CFLAGS) -mpreferred-stack-boundary=2" \
 		ASFLAGS="$(ASFLAGS) -DUNDERSCORES"
 
 win32-cygwin-x86-mmx:
 	$(CP) x86-mmx.h arch.h
 	$(MAKE) $(PROJ_WIN32) \
-		BIT_OBJS="$(BIT_OBJS) x86.o x86-mmx.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o x86-mmx.o" \
 		CFLAGS="$(CFLAGS) -mpreferred-stack-boundary=2" \
 		ASFLAGS="$(ASFLAGS) -DUNDERSCORES"
 
 win32-cygwin-x86-any:
 	$(CP) x86-any.h arch.h
 	$(MAKE) $(PROJ_WIN32) \
-		BIT_OBJS="$(BIT_OBJS) x86.o" \
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o" \
 		CFLAGS="$(CFLAGS) -mpreferred-stack-boundary=2" \
 		ASFLAGS="$(ASFLAGS) -DUNDERSCORES"
 
 beos-x86-sse2:
 	$(LN) x86-sse.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) x86.o x86-sse.o"
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o x86-sse.o"
 
 beos-x86-mmx:
 	$(LN) x86-mmx.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) x86.o x86-mmx.o"
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o x86-mmx.o"
 
 beos-x86-any:
 	$(LN) x86-any.h arch.h
 	$(MAKE) $(PROJ) \
-		BIT_OBJS="$(BIT_OBJS) x86.o"
+		BITRIPPER_OBJS="$(BITRIPPER_OBJS) x86.o"
 
-../bitripper: $(BIT_OBJS)
-	$(LD) $(BIT_OBJS) $(LDFLAGS) -o ../bitripper
+../bitripper: $(BITRIPPER_OBJS)
+	$(LD) $(BITRIPPER_OBJS) $(LDFLAGS) -o ../bitripper
 
-../bitripper.exe: $(BIT_OBJS)
-	$(LD) $(BIT_OBJS) -lkernel32 -o ../bitripper.exe
-	strip ../bitripper.exe
+../bitripper.exe: $(BITRIPPER_OBJS)
+	$(LD) $(BITRIPPER_OBJS) -lkernel32 -o ../bitripper.exe
+	strip ../run/bitripper.exe
 
 # Inlining the S-boxes produces faster code as long as they fit in the cache.
 DES_bs_b.o: DES_bs_b.c sboxes.c nonstd.c sboxes-s.c
@@ -689,18 +779,25 @@ DES_bs_b.o: DES_bs_b.c sboxes.c nonstd.c sboxes-s.c
 miscnl.o: misc.c
 	$(CC) $(CFLAGS) $(OPT_NORMAL) -D_JOHN_MISC_NO_LOG misc.c -o miscnl.o
 
+bitripper.o: bitripper.c
+	$(CC) $(CFLAGS_MAIN) $(OPT_NORMAL) $*.c
+
 .c.o:
 	$(CC) $(CFLAGS) $(OPT_NORMAL) $*.c
 
 .S.o:
 	$(AS) $(ASFLAGS) $*.S
 
+# We don't have any files with .s suffix, this is for compiling in DOS only
+.s.o:
+	$(AS) $(ASFLAGS) $*.S
+
 depend:
 	makedepend -fMakefile.dep -Y *.c 2>> /dev/null
 
 clean:
-	$(RM) $(PROJ) $(PROJ_WIN32)
-	$(RM) ../bitripper *.o *.bak core
+	$(RM) $(PROJ) $(PROJ_DOS) $(PROJ_WIN32)
+	$(RM) ../run/john.exe john-macosx-* *.o *.bak core
 	$(RM) detect bench generic.h arch.h tmp.s
 	$(CP) $(NULL) Makefile.dep
 

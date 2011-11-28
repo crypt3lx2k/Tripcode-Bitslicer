@@ -1,6 +1,6 @@
 /*
  * This file is part of John the Ripper password cracker,
- * Copyright (c) 1996-2001,2005,2010 by Solar Designer
+ * Copyright (c) 1996-2001,2005,2010,2011 by Solar Designer
  */
 
 /*
@@ -50,80 +50,102 @@ typedef struct {
 	} KS;			/* Current key schedule */
 	union {
 		ARCH_WORD *E[96];	/* Expansion function (data bit ptrs) */
-		struct {
-#if !DES_BS_VECTOR && ARCH_BITS >= 64
-			unsigned char keys[DES_BS_DEPTH][8]; /* Current keys */
-#endif
-			unsigned char u[0x100];	/* Uppercase */
-		} extras;		/* Re-use the cache space for LM */
+		unsigned char u[0x100];	/* Uppercase (for LM) */
 	} E;
 	DES_bs_vector K[56];	/* Keys */
 	DES_bs_vector B[64];	/* Data blocks */
 #if DES_BS_ASM
 	DES_bs_vector tmp[16];	/* Miscellaneous temporary storage */
-#elif defined(__MMX__) || defined(__SSE2__)
-	DES_bs_vector ones;	/* All 1 bits (to implement NOT with XOR) */
+#else
+	DES_bs_vector zero;	/* All 0 bits */
+	DES_bs_vector ones;	/* All 1 bits */
+	DES_bs_vector masks[8];	/* Each byte set to 0x01 ... 0x80 */
 #endif
-	unsigned int s1[0x100];	/* Byte offsets past the 1st bit */
-	unsigned char s2[0x100];	/* Shift counts past the 2nd bit */
-	int KS_updates;		/* Key schedule updates counter */
-	int keys_changed;	/* If keys have changed since last expand */
-	unsigned char keys[DES_BS_DEPTH][8];	/* Current keys */
+	union {
+		unsigned char c[8][8][sizeof(DES_bs_vector)];
+		DES_bs_vector v[8][8];
+	} xkeys;		/* Partially transposed key bits matrix */
+	unsigned char *pxkeys[DES_BS_DEPTH]; /* Pointers into xkeys.c */
+	int keys_changed;	/* If keys have changed */
+	unsigned int salt;	/* Salt value corresponding to E[] contents */
+	DES_bs_vector *Ens[48];	/* Pointers into B[] for non-salted E */
 } DES_bs_combined;
 
+#if defined(_OPENMP) && !DES_BS_ASM
+#define DES_bs_mt			1
+#define DES_bs_cpt			32
+#define DES_bs_mt_max			(DES_bs_cpt * 24)
+extern int DES_bs_min_kpc, DES_bs_max_kpc;
+extern int DES_bs_nt;
+extern DES_bs_combined *DES_bs_all_p;
+#define DES_bs_all_align		64
+#define DES_bs_all_size \
+	((sizeof(DES_bs_combined) + (DES_bs_all_align - 1)) & \
+	    ~(DES_bs_all_align - 1))
+#define DES_bs_all_by_tnum(tnum) \
+	(*(DES_bs_combined *)((char *)DES_bs_all_p + (tnum) * DES_bs_all_size))
+#ifdef __GNUC__
+#define DES_bs_all \
+	(*(DES_bs_combined *)((char *)DES_bs_all_p + t))
+#define for_each_t(n) \
+	for (t = 0; t < (n) * DES_bs_all_size; t += DES_bs_all_size)
+#define init_t() \
+	int t = (unsigned int)index / DES_BS_DEPTH * DES_bs_all_size; \
+	index = (unsigned int)index % DES_BS_DEPTH;
+#else
+/*
+ * For compilers that complain about the above e.g. with "iteration expression
+ * of omp for loop does not have a canonical shape".
+ */
+#define DES_bs_all \
+	DES_bs_all_by_tnum(t)
+#define for_each_t(n) \
+	for (t = 0; t < (n); t++)
+#define init_t() \
+	int t = (unsigned int)index / DES_BS_DEPTH; \
+	index = (unsigned int)index % DES_BS_DEPTH;
+#endif
+#else
+#define DES_bs_mt			0
+#define DES_bs_cpt			1
 extern DES_bs_combined DES_bs_all;
+#define for_each_t(n)
+#define init_t()
+#endif
 
 /*
  * Initializes the internal structures.
  */
-extern void DES_bs_init(int LM);
+extern void DES_bs_init(int LM, int cpt);
 
 /*
  * Sets a salt for DES_bs_crypt().
  */
 extern void DES_bs_set_salt(ARCH_WORD salt);
-
-/*
- * Clears the bitslice keys if the key schedule has been updated too
- * many times without being fully regenerated. This should be called
- * whenever possible to reduce the impact of hardware faults.
- */
-extern void DES_bs_clear_keys(void);
-extern void DES_bs_clear_keys_LM(void);
-
-/*
- * Sets a key for DES_bs_crypt().
- */
-extern void DES_bs_set_key(char *key, int index);
-
-/*
- * Initializes the key schedule with actual key bits. Not for LM.
- */
-#if DES_BS_EXPAND
-extern void DES_bs_expand_keys(void);
-#else
-#define DES_bs_expand_keys()
+#if DES_bs_mt
+extern void DES_bs_set_salt_for_thread(int t, unsigned int salt);
 #endif
 
 /*
- * Sets a key for DES_bs_crypt_LM().
+ * Set a key for DES_bs_crypt() or DES_bs_crypt_LM(), respectively.
  */
+extern void DES_bs_set_key(char *key, int index);
 extern void DES_bs_set_key_LM(char *key, int index);
 
 /*
- * Generic bitslice routine: 24 bit salts, variable iteration count.
+ * Almost generic implementation: 24-bit salts, variable iteration count.
  */
-extern void DES_bs_crypt(int count);
+extern void DES_bs_crypt(int count, int keys_count);
 
 /*
- * A simplified special-case version: 12 bit salts, 25 iterations.
+ * A simplified special-case implementation: 12-bit salts, 25 iterations.
  */
-extern void DES_bs_crypt_25(void);
+extern void DES_bs_crypt_25(int keys_count);
 
 /*
  * Another special-case version: a non-zero IV, no salts, no iterations.
  */
-extern void DES_bs_crypt_LM(void);
+extern void DES_bs_crypt_LM(int keys_count);
 
 /*
  * Converts an ASCII ciphertext to binary to be used with one of the
@@ -137,15 +159,21 @@ extern ARCH_WORD *DES_bs_get_binary(char *ciphertext);
 extern ARCH_WORD *DES_bs_get_binary_LM(char *ciphertext);
 
 /*
- * Calculates a hash for a DES_bs_crypt() output.
+ * Calculate a hash for a DES_bs_crypt() output.
  */
-extern int DES_bs_get_hash(int index, int count);
+extern int DES_bs_get_hash_0(int index);
+extern int DES_bs_get_hash_1(int index);
+extern int DES_bs_get_hash_2(int index);
+extern int DES_bs_get_hash_3(int index);
+extern int DES_bs_get_hash_4(int index);
+extern int DES_bs_get_hash_5(int index);
+extern int DES_bs_get_hash_6(int index);
 
 /*
- * Compares 32 bits of a given ciphertext against all the DES_bs_crypt()
- * outputs and returns zero if no matches detected.
+ * Compares 32 bits of a given ciphertext against at least the first count of
+ * the DES_bs_crypt*() outputs and returns zero if no matches detected.
  */
-extern int DES_bs_cmp_all(ARCH_WORD *binary);
+extern int DES_bs_cmp_all(ARCH_WORD *binary, int count);
 
 /*
  * Compares count bits of a given ciphertext against one of the outputs.
