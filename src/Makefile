@@ -640,7 +640,7 @@ macosx-ppc64-cross:
 		OPT_NORMAL="-fast" \
 		OPT_INLINE="-fast -finline-limit=4000"
 
-john-macosx-x86-64:
+bitripper-macosx-x86-64:
 	$(RM) *.o
 	$(LN) x86-64.h arch.h
 	$(MAKE) $(PROJ) \
@@ -648,9 +648,9 @@ john-macosx-x86-64:
 		ASFLAGS="$(ASFLAGS) -arch x86_64 -m64 -DUNDERSCORES -DBSD -DALIGN_LOG" \
 		CFLAGS="$(CFLAGS) -arch x86_64 -m64" \
 		LDFLAGS="$(LDFLAGS) -arch x86_64 -m64"
-	mv ../run/john john-macosx-x86-64
+	mv ../bitripper bitripper-macosx-x86-64
 
-john-macosx-x86:
+bitripper-macosx-x86:
 	$(RM) *.o
 	$(LN) x86-sse.h arch.h
 	$(MAKE) $(PROJ) \
@@ -658,9 +658,9 @@ john-macosx-x86:
 		ASFLAGS="$(ASFLAGS) -arch i386 -m32 -DUNDERSCORES -DBSD -DALIGN_LOG" \
 		CFLAGS="$(CFLAGS) -arch i386 -m32" \
 		LDFLAGS="$(LDFLAGS) -arch i386 -m32"
-	mv ../run/john john-macosx-x86
+	mv ../bitripper bitripper-macosx-x86
 
-john-macosx-ppc:
+bitripper-macosx-ppc:
 	$(RM) *.o
 	$(LN) ppc32alt.h arch.h
 	$(MAKE) $(PROJ) \
@@ -669,11 +669,11 @@ john-macosx-ppc:
 		LDFLAGS="$(LDFLAGS) -arch ppc" \
 		OPT_NORMAL="-fast -mcpu=7450" \
 		OPT_INLINE="-fast -mcpu=7450 -finline-limit=4000 -faltivec -maltivec"
-	mv ../run/john john-macosx-ppc
+	mv ../bitripper bitripper-macosx-ppc
 
-macosx-universal: john-macosx-x86-64 john-macosx-x86 john-macosx-ppc
-	lipo -create john-macosx-x86-64 john-macosx-x86 john-macosx-ppc \
-		-output ../run/john
+macosx-universal: bitripper-macosx-x86-64 bitripper-macosx-x86 bitripper-macosx-ppc
+	lipo -create bitripper-macosx-x86-64 bitripper-macosx-x86 bitripper-macosx-ppc \
+		-output ../bitripper
 
 hpux-pa-risc-gcc:
 	$(LN) pa-risc.h arch.h
@@ -797,8 +797,8 @@ depend:
 
 clean:
 	$(RM) $(PROJ) $(PROJ_DOS) $(PROJ_WIN32)
-	$(RM) ../run/john.exe john-macosx-* *.o *.bak core
-	$(RM) detect bench generic.h arch.h tmp.s
+	$(RM) ../bitripper.exe bitripper-macosx-* *.o *.bak core
+	$(RM) arch.h tmp.s
 	$(CP) $(NULL) Makefile.dep
 
 include Makefile.dep

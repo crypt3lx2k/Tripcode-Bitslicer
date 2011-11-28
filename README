@@ -1,10 +1,14 @@
-Currently under construction, will currently only work on x86 GNU/Linux systems with SSE2 support.
-Due to the beautiful setup of the John the Ripper source code it will be easy to extend this to a multitude of platforms.
+Currently under construction, the only machine I have access to is an x86-32-sse2 so for now that is all that is supported.
+Due to the beautiful setup of the John the Ripper source code it will be easy to extend this to a multitude of platforms,
+and if my surgery on the Makefile was successful, most architectures that are supported by john the ripper is also supported
+by this program, but there is no way for me to tell right now.
 
-I eventually intend to create a Python module to
-#1 - Easily interface with John the Ripper from Python
-#2 - Integrate the DES bit slice technique into DictRipper <https://github.com/crypt3lx2k/DictRipper>
+At first I intended to make a Python module out of this, mainly to use with the DictRipper project, now I'm not so sure.
+The main reason for this is that when it comes to tripcodes pre-computed tables are just so incredibly efficient compared
+to anything brute force. This might change though, I'm just unsure about it right now.
 
+My current plans for this project is to create an efficient tripcode cracker that runs on clusters, so I might try to use
+the multi-threading capabilities although first up comes multi-processing.
 
 Current compiling is done with
 $ cd src/
@@ -16,5 +20,7 @@ Something is bound to be broken in the makefile as well since all I did was some
 
 And current usage is
 $ ./bitripper tripcode wordlist
+
+Where tripcode is the targeted tripcode and wordlist is a list of words (NB must use UNIX newline convention!) one word per line.
 
 Again, this is likely to change in the near future, I will probably have some kind of file system with targets and hits.

@@ -6,28 +6,14 @@
 #ifndef __BITRIPPER_H
 #define __BITRIPPER_H
 
-#include "arch.h"
 #include "DES_bs.h"
-#include "DES_std.h"
 
 /* The number of boxes is the number
    of possible hashes for salt */
 #define NUMBER_OF_BOXES (1 << 12)
 #define KEYS_PER_BOX DES_BS_DEPTH
 
-/*
- * With bitslicing DES we run several keys
- * at the same time with a single salt, we
- * therefore divide the keys into several
- * boxes hashed by the corresponding salt.
- */
-typedef struct {
-  ARCH_WORD salt_binary;
-  int number_of_keys;
-  char keys [KEYS_PER_BOX][9];
-} Box;
-
-/* salt hash */
+/* 12 bit hash based on salt */
 #define SALT_HASH(hash, salt)			\
   do {						\
     hash  = (salt[0] & 0x3f);			\
@@ -63,5 +49,7 @@ const char hidden[] =
   "./0123456789"
   "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
   "abcdefghijklmnopqrstuvwxyz";
+
+#define HIDDEN_POSSIBILITIES (sizeof(hidden))
 
 #endif /* __BITRIPPER_H */
