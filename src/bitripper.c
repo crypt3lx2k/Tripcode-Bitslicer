@@ -30,7 +30,7 @@ static struct {
   char keys[KEYS_PER_BOX][8];
 } CC_CACHE_ALIGN boxes[NUMBER_OF_BOXES];
 
-static struct cipher {
+static struct {
   /*
    * The magic number 2 here comes from
    * line 1077, 1088 in DES_std.c:
@@ -40,7 +40,7 @@ static struct cipher {
    */
   ARCH_WORD binaries[HIDDEN_POSSIBILITIES][2];
   char text[11];
-} CC_CACHE_ALIGN * ciphers;
+} CC_CACHE_ALIGN ciphers[256];
 
 static MAYBE_INLINE int handle_hit (char * key, int cipher) {
   char output [9];
@@ -68,7 +68,7 @@ static MAYBE_INLINE int run_box(int box_number) {
   for (i = 0; i < HIDDEN_POSSIBILITIES; i++)
     if (DES_bs_cmp_all(ciphers[0].binaries[i], 32))
       for (j = 0; j < keys; j++)
-	if (DES_bs_cmp_one(ciphers[0].binaries[i], 2*ARCH_BITS, j))
+	if (DES_bs_cmp_one(ciphers[0].binaries[i], 64, j))
 	  return handle_hit (boxes[box_number].keys[j], 0);
 
   return 0;
@@ -79,7 +79,7 @@ int main (int argc, char **argv) {
   char salt[14];
   FILE * infile;
 
-  if (argc < 2) {
+  if (argc < 3) {
     fprintf(stderr,
 	    "usage: %s tripcode wordfile\n",
 	    argv[0]);
@@ -95,7 +95,6 @@ int main (int argc, char **argv) {
     char ciphertext [14];
     ARCH_WORD * binary;
 
-    ciphers = malloc(1 * sizeof(struct cipher));
     strncat(&ciphers[0].text[0], argv[1], 10);
 
     memset(ciphertext, 0, 14);
@@ -128,12 +127,19 @@ int main (int argc, char **argv) {
     int index;
     size_t input_length;
 
-    memset(salt, 'H', 2);
+    if (io_buffer[0] == '\0')
+      continue;
 
     input_length = strlen(io_buffer);
 
-    if (io_buffer[input_length - 1] == '\n')
+    while (io_buffer[input_length - 1] == '\n' ||
+	   io_buffer[input_length - 1] == '\r')
       io_buffer[--input_length] = '\0';
+
+    if (!input_length)
+      continue;
+
+    memset(salt, 'H', 2);
 
     switch (input_length) {
     case 1:
@@ -146,7 +152,7 @@ int main (int argc, char **argv) {
       break;
     }
 
-    SALT_HASH(hash, salt);
+    hash = SALT_HASH(salt);
 
     if (!boxes[hash].salt_binary)
       boxes[hash].salt_binary = DES_raw_get_salt(salt);
@@ -159,7 +165,7 @@ int main (int argc, char **argv) {
     if (boxes[hash].number_of_keys == KEYS_PER_BOX)
       run_box(hash);
 
-    memset(io_buffer, '\0', IO_BUFFER_SIZE);
+    memset(io_buffer, '\0', input_length);
   }
 
   {

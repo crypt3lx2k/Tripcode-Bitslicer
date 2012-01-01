@@ -3,8 +3,8 @@
  * Copyright (C) 2011 Truls Edvard Stokke
  */
 
-#ifndef __BITRIPPER_H
-#define __BITRIPPER_H
+#ifndef _BITRIPPER_H
+#define _BITRIPPER_H
 
 #include "DES_bs.h"
 
@@ -14,11 +14,9 @@
 #define KEYS_PER_BOX DES_BS_DEPTH
 
 /* 12 bit hash based on salt */
-#define SALT_HASH(hash, salt)			\
-  do {						\
-    hash  = (salt[0] & 0x3f);			\
-    hash |= (salt[1] & 0x3f) << 6;		\
-  } while (0)
+#define SALT_HASH(salt)				\
+  ((salt[0] & 0x3f) |				\
+   ((salt[1] & 0x3f) << 6))
 
 /*
  * Salt table for plaintexts.
@@ -52,4 +50,4 @@ const char hidden[] =
 
 #define HIDDEN_POSSIBILITIES (sizeof(hidden))
 
-#endif /* __BITRIPPER_H */
+#endif /* _BITRIPPER_H */

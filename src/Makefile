@@ -2,6 +2,11 @@
 # This file is part of John the Ripper password cracker,
 # Copyright (c) 1996-2011 by Solar Designer
 #
+# Modified for BitRipper imageboard tripcode cracker.
+#
+# See LICENSE file for details regarding files originating
+# from John the Ripper.
+#
 
 CC = gcc
 AS = $(CC)
@@ -41,7 +46,7 @@ default:
 	@echo "linux-x86-64-avx         Linux, x86-64 with AVX (2011+ Intel CPUs)"
 	@echo "linux-x86-64-xop         Linux, x86-64 with AVX and XOP (2011+ AMD CPUs)"
 	@echo "linux-x86-64             Linux, x86-64 with SSE2 (most common)"
-#	@echo "linux-x86-64-32-sse2     Linux, x86-64, 32-bit with SSE2"
+	@echo "linux-x86-64-32-sse2     Linux, x86-64, 32-bit with SSE2"
 #	@echo "linux-x86-64-32-mmx      Linux, x86-64, 32-bit with MMX"
 	@echo "linux-x86-avx            Linux, x86 32-bit with AVX (2011+ Intel CPUs)"
 	@echo "linux-x86-xop            Linux, x86 32-bit with AVX and XOP (2011+ AMD CPUs)"
