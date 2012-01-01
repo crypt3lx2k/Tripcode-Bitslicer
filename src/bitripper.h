@@ -3,8 +3,8 @@
  * Copyright (C) 2011 Truls Edvard Stokke
  */
 
-#ifndef _BITRIPPER_H
-#define _BITRIPPER_H
+#ifndef BITRIPPER_H__
+#define BITRIPPER_H__
 
 #include "DES_bs.h"
 
@@ -50,4 +50,4 @@ const char hidden[] =
 
 #define HIDDEN_POSSIBILITIES (sizeof(hidden))
 
-#endif /* _BITRIPPER_H */
+#endif /* BITRIPPER_H__ */

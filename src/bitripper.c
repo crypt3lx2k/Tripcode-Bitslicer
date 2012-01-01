@@ -14,6 +14,7 @@
 #include "bitripper.h"
 
 #define IO_BUFFER_SIZE 128
+#define MAX_CIPHERS 32
 
 /*
  * With bitslicing DES we want to run as many
@@ -31,29 +32,43 @@ static struct {
 } CC_CACHE_ALIGN boxes[NUMBER_OF_BOXES];
 
 static struct {
-  /*
-   * The magic number 2 here comes from
-   * line 1077, 1088 in DES_std.c:
-   *   static ARCH_WORD out[2];
-   *   ...
-   *   return out;
-   */
-  ARCH_WORD binaries[HIDDEN_POSSIBILITIES][2];
-  char text[11];
-} CC_CACHE_ALIGN ciphers[256];
+  struct {
+    /*
+     * The magic number 2 here comes from
+     * line 1077, 1088 in DES_std.c:
+     *   static ARCH_WORD out[2];
+     *   ...
+     *   return out;
+     */
+    ARCH_WORD binaries[HIDDEN_POSSIBILITIES][2];
+    char text[11];
+  } CC_CACHE_ALIGN array[MAX_CIPHERS];
+
+  int length;
+} CC_CACHE_ALIGN ciphers;
 
 static MAYBE_INLINE int handle_hit (char * key, int cipher) {
+  int i;
   char output [9];
 
   printf("#%s => !%s\n",
-	 strncat(output, key, 8),
-	 ciphers[cipher].text);
+	 strncpy(output, key, 8),
+	 ciphers.array[cipher].text);
 
-  return 1;
+  /* rearrange array */
+  ciphers.length -= 1;
+  for (i = cipher; i < ciphers.length; i++)
+    ciphers.array[i] = ciphers.array[i+1];
+
+  /* done? */
+  if (ciphers.length == 0)
+    return 1;
+
+  return 0;
 }
 
 static MAYBE_INLINE int run_box(int box_number) {
-  int i, j;
+  int i, j, k;
   int keys = boxes[box_number].number_of_keys;
 
   boxes[box_number].number_of_keys = 0;
@@ -63,13 +78,17 @@ static MAYBE_INLINE int run_box(int box_number) {
   for (i = 0; i < keys; i++)
     DES_bs_set_key(boxes[box_number].keys[i], i);
 
+  /* just try to guess where
+     most of the time is spent */
   DES_bs_crypt_25(keys);
 
-  for (i = 0; i < HIDDEN_POSSIBILITIES; i++)
-    if (DES_bs_cmp_all(ciphers[0].binaries[i], 32))
-      for (j = 0; j < keys; j++)
-	if (DES_bs_cmp_one(ciphers[0].binaries[i], 64, j))
-	  return handle_hit (boxes[box_number].keys[j], 0);
+  for (i = 0; i < ciphers.length; i++)
+    for (j = 0; j < HIDDEN_POSSIBILITIES; j++)
+      if (DES_bs_cmp_all(ciphers.array[i].binaries[j], 32))
+	for (k = 0; k < keys; k++)
+	  if (DES_bs_cmp_one(ciphers.array[i].binaries[j], 64, k))
+	    if (handle_hit(boxes[box_number].keys[k], i))
+	      return 1;
 
   return 0;
 }
@@ -81,7 +100,7 @@ int main (int argc, char **argv) {
 
   if (argc < 3) {
     fprintf(stderr,
-	    "usage: %s tripcode wordfile\n",
+	    "usage: %s targetlist wordfile\n",
 	    argv[0]);
     exit(EXIT_FAILURE);
   }
@@ -91,32 +110,58 @@ int main (int argc, char **argv) {
   DES_bs_init(0, DES_bs_cpt);
 
   {
-    int i;
-    char ciphertext [14];
-    ARCH_WORD * binary;
+    FILE * targets = fopen(argv[1], "r");
 
-    strncat(&ciphers[0].text[0], argv[1], 10);
+    if (targets == NULL) {
+      fprintf(stderr,
+	      "unable to open targetlist %s\n",
+	      argv[1]);
+      exit(EXIT_FAILURE);
+    }
 
-    memset(ciphertext, 0, 14);
-    strncpy(ciphertext + 3, argv[1], 10);
+    memset(io_buffer, '\0', IO_BUFFER_SIZE);
 
-    for (i = 0; i < HIDDEN_POSSIBILITIES; i++) {
-      ciphertext[2] = hidden[i];
-      binary = DES_bs_get_binary(ciphertext);
-      ciphers[0].binaries[i][0] = binary[0];
-      ciphers[0].binaries[i][1] = binary[1];
+    while (fgets(io_buffer, IO_BUFFER_SIZE, targets)) {
+      int i;
+      size_t input_length;
+      char ciphertext[14];
+      ARCH_WORD * binary;
+
+      if (ciphers.length == MAX_CIPHERS) {
+	fprintf(stderr,
+		"too many targets, can only handle %d\n",
+		MAX_CIPHERS);
+	exit(EXIT_FAILURE);
+      }
+
+      input_length = strlen(io_buffer);
+
+      strncat(&ciphers.array[ciphers.length].text[0],
+	      io_buffer, 10);
+
+      memset(ciphertext, 0, 14);
+      strncpy(ciphertext + 3, io_buffer, 10);
+
+      for (i = 0; i < HIDDEN_POSSIBILITIES; i++) {
+	ciphertext[2] = hidden[i];
+	binary = DES_bs_get_binary(ciphertext);
+	ciphers.array[ciphers.length].binaries[i][0] = binary[0];
+	ciphers.array[ciphers.length].binaries[i][1] = binary[1];
+      }
+
+      ciphers.length += 1;
+
+      memset(io_buffer, '\0', input_length);
     }
   }
 
-  {
-    infile = fopen(argv[2], "r");
+  infile = fopen(argv[2], "r");
 
-    if (infile == NULL) {
-      fprintf(stderr,
-	      "unable to open file %s\n",
-	      argv[2]);
-      exit(EXIT_FAILURE);
-    }
+  if (infile == NULL) {
+    fprintf(stderr,
+	    "unable to open file %s\n",
+	    argv[2]);
+    exit(EXIT_FAILURE);
   }
 
   memset(io_buffer, '\0', IO_BUFFER_SIZE);

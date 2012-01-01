@@ -15,6 +15,6 @@ Something is bound to be broken in the makefile as well since all I did was some
 And current usage is
 $ ./bitripper tripcode wordlist
 
-Where tripcode is the targeted tripcode and wordlist is a list of words (NB must use UNIX newline convention!) one word per line.
+Where targetlist is a list of tripcodes (one per line 10 characters long) that you want to crack and wordlist is a list of words (one per line, UNIX, Windows or OS X style newlines are all accepted).
 
 Again, this is likely to change in the near future, I will probably have some kind of file system with targets and hits.
