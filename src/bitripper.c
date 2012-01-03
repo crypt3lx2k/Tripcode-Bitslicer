@@ -156,8 +156,8 @@ static MAYBE_INLINE int run_box(int box_number) {
      most of the time is spent */
   DES_bs_crypt_25(keys);
 
- next:
-  for (i = 0; i < ciphers.length; i++)
+  for (i = 0; i < ciphers.length; i++) {
+  next:
     for (j = 0; j < HIDDEN_POSSIBILITIES; j++)
       if (DES_bs_cmp_all(ciphers.array[i].binaries[j], 32))
 	for (k = 0; k < keys; k++)
@@ -165,6 +165,7 @@ static MAYBE_INLINE int run_box(int box_number) {
 	    handle_hit(boxes[box_number].keys[k], i);
 	    goto next;
 	  }
+  }
 
   return 0;
 }
