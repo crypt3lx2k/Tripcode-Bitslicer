@@ -13,8 +13,9 @@ I had to remove DOS support until I can read some docs.
 Something is bound to be broken in the makefile as well since all I did was some very crude and ugly brute surgery, I'll completely rewrite it when I have time.
 
 And current usage is
-$ ./bitripper targetlist wordlist
+$ ./bitripper targetlist [wordlists...]
 
-Where targetlist is a list of tripcodes (one per line 10 characters long) that you want to crack and wordlist is a list of words (one per line, UNIX, Windows or OS X style newlines are all accepted).
+Where targetlist is a list of tripcodes (one per line 10 characters long) that you want to crack.
+You may alternatively also specify some wordlists which will be used before the main brute force search of the keyspace starts.
 
 Again, this is likely to change in the near future, I will probably have some kind of file system with targets and hits.

@@ -11,7 +11,7 @@
 /* The number of boxes is the number
    of possible hashes for salt */
 #define NUMBER_OF_BOXES (1 << 12)
-#define KEYS_PER_BOX DES_BS_DEPTH
+#define KEYS_PER_BOX (DES_BS_DEPTH)
 
 /* 12 bit hash based on salt */
 #define SALT_HASH(salt)				\
