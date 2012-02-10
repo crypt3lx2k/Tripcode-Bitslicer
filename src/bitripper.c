@@ -7,14 +7,56 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <mpi.h>
+
 #include "arch.h"
 #include "common.h"  /* MAYBE_INLINE, CC_CACHE_ALIGN */
 #include "DES_std.h" /* DES_raw_get_salt */
 #include "DES_bs.h"
+
 #include "bitripper.h"
+#include "bitripper-mpi.h"
 
 #define IO_BUFFER_SIZE 128
 #define MAX_CIPHERS 256
+
+/*
+ * This number defines the number of possible
+ * divisions of the keyspace.
+ *
+ * The number in this instance is 1 + 7f + 7f^2
+ * (in mathematical notation) and defines the
+ * number of possible key combinations for the
+ * last two characters in a null terminated
+ * string.
+ *
+ * The choice of dividing the keyspace with
+ * only the last two blocks is an arbitrary
+ * decision to ease the division of work.
+ * If you need to run more than 16256
+ * processes at the same time you may
+ * increase the number of blocks used to
+ * divide the keyspace, but keep in mind that
+ * the complexity of the divide_keyspace
+ * function increases.
+ */
+#define KEY_BLOCKS 16257
+
+/* rank of this process
+   within MPI_COMM_WORLD */
+static int mpi_rank;
+
+/* total number of processes
+   in MPI_COMM_WORLD */
+static int mpi_size;
+
+/* request handler connected
+   to cracked tripcodes */
+static MPI_Request mpi_cracked_handler;
+
+/* index of last cracked
+   tripcode in ciphers.array */
+static int mpi_last_cracked;
 
 /*
  * With bitslicing DES we want to run as many
@@ -52,10 +94,10 @@ static int read_targets (char * filename) {
   FILE * targets = fopen(filename, "r");
 
   if (targets == NULL) {
-    fprintf(stderr,
-	    "unable to open targetlist %s\n",
-	    filename);
-    exit(EXIT_FAILURE);
+    root_eprintf(mpi_rank,
+		 "unable to open targetlist %s\n",
+		 filename);
+    FINALIZE_AND_FAIL;
   }
 
   memset(io_buffer, '\0', IO_BUFFER_SIZE);
@@ -67,10 +109,10 @@ static int read_targets (char * filename) {
     ARCH_WORD * binary;
 
     if (ciphers.length == MAX_CIPHERS) {
-      fprintf(stderr,
-	      "too many targets, can only handle %d\n",
-	      MAX_CIPHERS);
-      exit(EXIT_FAILURE);
+      root_eprintf(mpi_rank,
+		   "too many targets, can only handle %d\n",
+		   MAX_CIPHERS);
+      FINALIZE_AND_FAIL;
     }
 
     if (io_buffer[0] == '\0')
@@ -78,16 +120,17 @@ static int read_targets (char * filename) {
 
     input_length = strlen(io_buffer);
 
-    while (io_buffer[input_length - 1] == '\n' ||
-	   io_buffer[input_length - 1] == '\r')
+    while (input_length &&
+	   (io_buffer[input_length - 1] == '\n' ||
+	    io_buffer[input_length - 1] == '\r'))
       io_buffer[--input_length] = '\0';
 
     /* does not clearing the buffer
        here have any effect? */
     if (input_length < 10) {
-      fprintf(stderr,
-	      "illegal line: %s in target file %s\n",
-	      io_buffer, filename);
+      root_eprintf(mpi_rank,
+		   "illegal line: %s in target file %s\n",
+		   io_buffer, filename);
       continue;
     }
 
@@ -110,41 +153,70 @@ static int read_targets (char * filename) {
   }
 
   if (ciphers.length == 0) {
-    fprintf(stderr,
-	    "no tripcodes to crack\n");
-    exit(EXIT_FAILURE);
+    root_eprintf(mpi_rank,
+		 "no tripcodes to crack\n");
+    FINALIZE_AND_FAIL;
   }
 
   return ciphers.length;
 }
 
-static MAYBE_INLINE int handle_hit (char * key, int cipher) {
-  int i;
+static void set_cracked_handler (void) {
+  MPI_Irecv(&mpi_last_cracked, 1, MPI_INT,
+	    MPI_ANY_SOURCE, CRACKED_TAG,
+	    MPI_COMM_WORLD, &mpi_cracked_handler);
+}
+
+static void check_for_hits (void) {
+  int cracked;
+
+  MPI_Test(&mpi_cracked_handler, &cracked,
+	   MPI_STATUS_IGNORE);
+
+  while (cracked) {
+    int i;
+
+    /* rearrange array */
+    ciphers.length -= 1;
+    for (i = mpi_last_cracked; i < ciphers.length; i++)
+      ciphers.array[i] = ciphers.array[i+1];
+
+    /* done? */
+    if (ciphers.length == 0) {
+      root_printf(mpi_rank, "every tripcode cracked!\n");
+      FINALIZE_AND_SUCCEED;
+    }
+
+    set_cracked_handler();
+
+    MPI_Test(&mpi_cracked_handler, &cracked,
+	     MPI_STATUS_IGNORE);
+  }
+}
+
+static MAYBE_INLINE void handle_hit (char * key, int cipher) {
+  int rank;
+
+  for (rank = 0; rank < mpi_size; rank++)
+    MPI_Send(&cipher, 1, MPI_INT,
+	     rank, CRACKED_TAG,
+	     MPI_COMM_WORLD);
 
   printf("%02x %02x %02x %02x "
 	 "%02x %02x %02x %02x => %s\n",
 	 key[0], key[1], key[2], key[3],
 	 key[4], key[5], key[6], key[7],
-	 ciphers.array[cipher].text);
-
-  /* rearrange array */
-  ciphers.length -= 1;
-  for (i = cipher; i < ciphers.length; i++)
-    ciphers.array[i] = ciphers.array[i+1];
-
-  /* done? */
-  if (ciphers.length == 0) {
-    printf("every tripcode cracked!\n");
-    exit(EXIT_SUCCESS);
-  }
-
-  return 0;
+	 ciphers.array[mpi_last_cracked].text);
+  fflush(stdout);
 }
 
-static MAYBE_INLINE int run_box(int box_number) {
+static MAYBE_INLINE int run_box (int box_number) {
   int i, j, k;
-  int keys = boxes[box_number].number_of_keys;
+  int keys;
 
+  check_for_hits();
+
+  keys = boxes[box_number].number_of_keys;
   boxes[box_number].number_of_keys = 0;
 
   DES_bs_set_salt(boxes[box_number].salt_binary);
@@ -156,16 +228,17 @@ static MAYBE_INLINE int run_box(int box_number) {
      most of the time is spent */
   DES_bs_crypt_25(keys);
 
-  for (i = 0; i < ciphers.length; i++) {
-  next:
+  i = 0;
+ next:
+  for (/* i = 0 */; i < ciphers.length; i++)
     for (j = 0; j < HIDDEN_POSSIBILITIES; j++)
       if (DES_bs_cmp_all(ciphers.array[i].binaries[j], 32))
 	for (k = 0; k < keys; k++)
 	  if (DES_bs_cmp_one(ciphers.array[i].binaries[j], 64, k)) {
 	    handle_hit(boxes[box_number].keys[k], i);
-	    goto next;
+	    i++; goto next;
 	  }
-  }
+  /* good guess */
 
   return 0;
 }
@@ -203,28 +276,6 @@ static MAYBE_INLINE int run_key (const char key[9], char salt[14], size_t keylen
   return hash;
 }
 
-static int loop_key (char key[9]) {
-  char salt[14];
-  memset(salt, '\0', 14);
-
-  do {
-    int i;
-
-    key[0] += 1;
-
-    for (i = 0; key[i] && i < 7; i++) {
-      if (key[i] == (char) 0x80) {
-	key[i]    = 1;
-	key[i+1] += 1;
-      }
-    }
-
-    run_key(key, salt, i);
-  } while (key[8] != 0x7f);
-
-  return 1;
-}
-
 static int loop_file (const char * filename) {
   char salt[14];
   char io_buffer[IO_BUFFER_SIZE];
@@ -234,7 +285,8 @@ static int loop_file (const char * filename) {
 
   if (infile == NULL) {
     fprintf(stderr,
-	    "unable to open file %s\n",
+	    "process %d: unable to open file %s\n",
+	    mpi_rank,
 	    filename);
     return 0;
   }
@@ -250,8 +302,9 @@ static int loop_file (const char * filename) {
 
     input_length = strlen(io_buffer);
 
-    while (io_buffer[input_length - 1] == '\n' ||
-	   io_buffer[input_length - 1] == '\r')
+    while (input_length &&
+	   (io_buffer[input_length - 1] == '\n' ||
+	    io_buffer[input_length - 1] == '\r'))
       io_buffer[--input_length] = '\0';
 
     if (!input_length)
@@ -266,23 +319,69 @@ static int loop_file (const char * filename) {
   return 1;
 }
 
+static void divide_keyspace (int rank, int size, int indices[2]) {
+  int lower_index = BLOCK_LOW(rank, size, KEY_BLOCKS);
+
+  indices[1] = BLOCK_LOW(rank, size, 0x80);
+  indices[0] = lower_index - 0x7f * indices[1];
+}
+
+static void loop_key (char key[9]) {
+  char salt[14];
+  int indices[2];
+
+  memset(salt, '\0', 14);
+
+  divide_keyspace(mpi_rank + 1, mpi_size, indices);
+
+  while (key[6] != (char) indices[0] ||
+	 key[7] != (char) indices[1]) {
+    int i;
+
+    run_key(key, salt, i);
+
+    key[0] += 1;
+
+    for (i = 0; (key[i] == (char) 0x80) && i < 6; i++) {
+      key[i+0]  = 1;
+      key[i+1] += 1;
+    }
+  }
+}
+
 static void finalize (void) {
   int i;
 
   for (i = 0; i < NUMBER_OF_BOXES; i++)
     if (boxes[i].number_of_keys)
       run_box(i);
+
+  check_for_hits();
 }
 
-int main (int argc, char **argv) {
+int main (int argc, char * argv[]) {
   int i;
+  int indices[2];
   char key[9];
 
+  MPI_Init(&argc, &argv);
+
+  MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
+
+  if (mpi_size > KEY_BLOCKS) {
+    root_eprintf(mpi_rank,
+		 "Too many processes spawned.\n"
+		 "This program may only handle %d processes, see the KEY_BLOCKS macro for details.\n",
+		 KEY_BLOCKS);
+    FINALIZE_AND_FAIL;
+  }
+
   if (argc < 2) {
-    fprintf(stderr,
-	    "usage: %s targetlist [wordlists...]\n",
-	    argv[0]);
-    exit(EXIT_FAILURE);
+    root_eprintf(mpi_rank,
+		 "usage: %s targetlist [wordlists...]\n",
+		 argv[0]);
+    FINALIZE_AND_FAIL;
   }
 
   /* Initialize DES_bs here in case some
@@ -290,14 +389,21 @@ int main (int argc, char **argv) {
   DES_bs_init(0, DES_bs_cpt);
 
   read_targets(argv[1]);
+  set_cracked_handler();
 
-  for (i = 2; i < argc; i++)
-    loop_file(argv[i]);
+  if (argc > 2)
+    for (i = BLOCK_LOW (mpi_rank, mpi_size, argc-2);
+	 i < BLOCK_HIGH(mpi_rank, mpi_size, argc-2); i++)
+      loop_file(argv[i+2]);
 
-  memset(key, '\0',  9);
+  divide_keyspace(mpi_rank, mpi_size, indices);
+
+  memset(key, '\0', 9);
+  key[6] = (char) indices[0];
+  key[7] = (char) indices[1];
+
   loop_key(key);
 
   finalize();
-
-  exit(EXIT_SUCCESS);
+  FINALIZE_AND_SUCCEED;
 }

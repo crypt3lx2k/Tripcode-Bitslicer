@@ -8,7 +8,7 @@
 # from John the Ripper.
 #
 
-CC = gcc
+CC = mpicc
 AS = $(CC)
 LD = $(CC)
 CPP = $(CC)
