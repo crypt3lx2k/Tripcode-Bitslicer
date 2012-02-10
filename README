@@ -13,7 +13,7 @@ I had to remove DOS support until I can read some docs.
 Something is bound to be broken in the makefile as well since all I did was some very crude and ugly brute surgery, I'll completely rewrite it when I have time.
 
 And current usage is
-$ ./bitripper targetlist [wordlists...]
+$ mpiexec -n processes ./bitripper targetlist [wordlists...]
 
 Where targetlist is a list of tripcodes (one per line 10 characters long) that you want to crack.
 You may alternatively also specify some wordlists which will be used before the main brute force search of the keyspace starts.
