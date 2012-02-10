@@ -19,3 +19,8 @@ Where targetlist is a list of tripcodes (one per line 10 characters long) that y
 You may alternatively also specify some wordlists which will be used before the main brute force search of the keyspace starts.
 
 Again, this is likely to change in the near future, I will probably have some kind of file system with targets and hits.
+
+Currently the main lack is in decent checkpointing, the ability to stop working and then starting to work at the exact same spot at some indeterminate time in the future.
+There is also optimization that will make the checking for hits at least 64 times faster, this would majorly increase performance, currently we create 64 different crypt hashes per tripcode since the tripcode lacks a character compared to a traditional crypt implementation, not checking for this extra character only means less work and we cut an entire for loop out of the hit checking, I just need to understand how the John BS system works at a low level.
+
+The current implementation is fit to use on massively homogeneous parallel architectures since he keyspace is statically divided, a dynamic allocation routine would be better for heterogenous parallel architectures like several different nodes working together, and could also increase performance since we could move the checking of hits from other processes to when the process receives a new search space.
