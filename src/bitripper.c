@@ -338,7 +338,7 @@ static void loop_key (char key[9]) {
 	 key[7] != (char) indices[1]) {
     int i;
 
-    run_key(key, salt, i);
+    run_key(key, salt, strlen(key));
 
     key[0] += 1;
 
@@ -360,7 +360,7 @@ static void finalize (void) {
 }
 
 int main (int argc, char * argv[]) {
-  int i;
+  int i, p;
   int indices[2];
   char key[9];
 
@@ -401,6 +401,14 @@ int main (int argc, char * argv[]) {
   memset(key, '\0', 9);
   key[6] = (char) indices[0];
   key[7] = (char) indices[1];
+
+  p = 0;
+  for (i = 0; i < 9; i++) {
+    if (p && !key[8-i])
+      key[8-i] = 1;
+
+    p |= key[8-i];
+  }
 
   loop_key(key);
 
