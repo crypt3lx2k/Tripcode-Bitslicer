@@ -360,7 +360,7 @@ static void finalize (void) {
 }
 
 int main (int argc, char * argv[]) {
-  int i, p;
+  int i;
   int indices[2];
   char key[9];
 
@@ -402,13 +402,19 @@ int main (int argc, char * argv[]) {
   key[6] = (char) indices[0];
   key[7] = (char) indices[1];
 
-  p = 0;
-  for (i = 0; i < 9; i++) {
-    if (p && !key[8-i])
-      key[8-i] = 1;
+  /* we assume that any valid key is zero terminated, which is
+     true for tripcodes but not for any DES key. So here we pad
+     keys so that no key has a zero before a non-zero value.
 
-    p |= key[8-i];
-  }
+     typically for process that don't have rank zero the key
+     will be transformed from something like
+
+     0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x2f 0x55 0x0
+     to
+     0x1 0x1 0x1 0x1 0x1 0x1 0x1 0x2f 0x55 0x0
+  */
+  if (key[6] || key[7])
+    memset(key, 1, 6);
 
   loop_key(key);
 
