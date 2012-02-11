@@ -402,17 +402,8 @@ int main (int argc, char * argv[]) {
   key[6] = (char) indices[0];
   key[7] = (char) indices[1];
 
-  /* we assume that any valid key is zero terminated, which is
-     true for tripcodes but not for any DES key. So here we pad
-     keys so that no key has a zero before a non-zero value.
-
-     typically for process that don't have rank zero the key
-     will be transformed from something like
-
-     0x0 0x0 0x0 0x0 0x0 0x0 0x2f 0x55 0x0
-     to
-     0x1 0x1 0x1 0x1 0x1 0x1 0x2f 0x55 0x0
-  */
+  /* pad keys so they're not terminated
+     before a non-zero character */
   if (key[6] || key[7])
     memset(key, 1, 6);
 

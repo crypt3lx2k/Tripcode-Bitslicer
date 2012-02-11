@@ -1,6 +1,11 @@
 /*
  * This file is part of John the Ripper password cracker,
  * Copyright (c) 1996-98,2010 by Solar Designer
+ *
+ * Modified for BitRipper imageboard tripcode cracker.
+ *
+ * See LICENSE file for details regarding files originating
+ * from John the Ripper.
  */
 
 #include <stdio.h>
@@ -9,7 +14,6 @@
 #include <errno.h>
 
 #include "arch.h"
-#include "misc.h"
 #include "memory.h"
 
 unsigned int mem_saving_level = 0;
@@ -22,7 +26,7 @@ void *mem_alloc(size_t size)
 
 	if (!(res = malloc(size))) {
 		fprintf(stderr, "malloc: %s\n", strerror(ENOMEM));
-		error();
+		exit(1);
 	}
 
 	return res;
