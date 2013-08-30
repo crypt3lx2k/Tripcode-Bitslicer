@@ -1,8 +1,9 @@
 /*
- * This file is part of BitRipper imageboard tripcode cracker,
- * Copyright (C) 2011 Truls Edvard Stokke
+ * This file is part of TripSlicer imageboard tripcode cracker,
+ * Copyright (C) 2011-2013 Truls Edvard Stokke
  */
 
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,33 +15,19 @@
 #include "DES_std.h" /* DES_raw_get_salt */
 #include "DES_bs.h"
 
-#include "bitripper.h"
-#include "bitripper-mpi.h"
+#include "tripslicer.h"
+#include "tripslicer-mpi.h"
+
+static const char alnum[] =
+  "abcdefghijklmnopqrstuvwxyz"
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+  "0123456789";
+
+#define CHARSET alnum
+#define CHARSET_SIZE (sizeof(CHARSET)-1)
 
 #define IO_BUFFER_SIZE 128
-#define MAX_CIPHERS 256
-
-/*
- * This number defines the number of possible
- * divisions of the keyspace.
- *
- * The number in this instance is 1 + 7f + 7f^2
- * (in mathematical notation) and defines the
- * number of possible key combinations for the
- * last two characters in a null terminated
- * string.
- *
- * The choice of dividing the keyspace with
- * only the last two blocks is an arbitrary
- * decision to ease the division of work.
- * If you need to run more than 16256
- * processes at the same time you may
- * increase the number of blocks used to
- * divide the keyspace, but keep in mind that
- * the complexity of the divide_keyspace
- * function increases.
- */
-#define KEY_BLOCKS 16257
+#define MAX_CIPHERS 4096
 
 /* rank of this process
    within MPI_COMM_WORLD */
@@ -50,13 +37,7 @@ static int mpi_rank;
    in MPI_COMM_WORLD */
 static int mpi_size;
 
-/* request handler connected
-   to cracked tripcodes */
-static MPI_Request mpi_cracked_handler;
-
-/* index of last cracked
-   tripcode in ciphers.array */
-static int mpi_last_cracked;
+static unsigned long int counter = 0;
 
 /*
  * With bitslicing DES we want to run as many
@@ -69,7 +50,6 @@ static struct {
   /* keys currently in box */
   int number_of_keys;
 
-  ARCH_WORD salt_binary;
   char keys[KEYS_PER_BOX][8];
 } CC_CACHE_ALIGN boxes[NUMBER_OF_BOXES];
 
@@ -82,7 +62,7 @@ static struct {
      *   ...
      *   return out;
      */
-    ARCH_WORD binaries[HIDDEN_POSSIBILITIES][2];
+    ARCH_WORD binary[2];
     char text[11];
   } CC_CACHE_ALIGN array[MAX_CIPHERS];
 
@@ -103,7 +83,6 @@ static int read_targets (char * filename) {
   memset(io_buffer, '\0', IO_BUFFER_SIZE);
 
   while (fgets(io_buffer, IO_BUFFER_SIZE, targets)) {
-    int i;
     size_t input_length;
     char ciphertext[14];
     ARCH_WORD * binary;
@@ -138,14 +117,12 @@ static int read_targets (char * filename) {
 	    io_buffer, 10);
 
     memset(ciphertext, 0, 14);
-    strncpy(ciphertext + 3, io_buffer, 10);
+    memset(ciphertext, '.', 3);
+    memcpy(ciphertext + 3, io_buffer, 10);
 
-    for (i = 0; i < HIDDEN_POSSIBILITIES; i++) {
-      ciphertext[2] = hidden[i];
-      binary = DES_bs_get_binary(ciphertext);
-      ciphers.array[ciphers.length].binaries[i][0] = binary[0];
-      ciphers.array[ciphers.length].binaries[i][1] = binary[1];
-    }
+    binary = DES_bs_get_binary(ciphertext);
+    ciphers.array[ciphers.length].binary[0] = binary[0];
+    ciphers.array[ciphers.length].binary[1] = binary[1];
 
     ciphers.length += 1;
 
@@ -161,65 +138,26 @@ static int read_targets (char * filename) {
   return ciphers.length;
 }
 
-static void set_cracked_handler (void) {
-  MPI_Irecv(&mpi_last_cracked, 1, MPI_INT,
-	    MPI_ANY_SOURCE, CRACKED_TAG,
-	    MPI_COMM_WORLD, &mpi_cracked_handler);
-}
-
-static void check_for_hits (void) {
-  int cracked;
-
-  MPI_Test(&mpi_cracked_handler, &cracked,
-	   MPI_STATUS_IGNORE);
-
-  while (cracked) {
-    int i;
-
-    /* rearrange array */
-    ciphers.length -= 1;
-    for (i = mpi_last_cracked; i < ciphers.length; i++)
-      ciphers.array[i] = ciphers.array[i+1];
-
-    /* done? */
-    if (ciphers.length == 0) {
-      root_printf(mpi_rank, "every tripcode cracked!\n");
-      FINALIZE_AND_SUCCEED;
-    }
-
-    set_cracked_handler();
-
-    MPI_Test(&mpi_cracked_handler, &cracked,
-	     MPI_STATUS_IGNORE);
-  }
-}
-
 static MAYBE_INLINE void handle_hit (char * key, int cipher) {
-  int rank;
-
-  for (rank = 0; rank < mpi_size; rank++)
-    MPI_Send(&cipher, 1, MPI_INT,
-	     rank, CRACKED_TAG,
-	     MPI_COMM_WORLD);
-
   printf("%02x %02x %02x %02x "
-	 "%02x %02x %02x %02x => %s\n",
-	 key[0], key[1], key[2], key[3],
-	 key[4], key[5], key[6], key[7],
-	 ciphers.array[mpi_last_cracked].text);
+  	 "%02x %02x %02x %02x => %s (%.8s)\n",
+  	 (unsigned) key[0], (unsigned) key[1],
+  	 (unsigned) key[2], (unsigned) key[3],
+  	 (unsigned) key[4], (unsigned) key[5],
+  	 (unsigned) key[6], (unsigned) key[7],
+  	 ciphers.array[cipher].text, key);
+
   fflush(stdout);
 }
 
-static MAYBE_INLINE int run_box (int box_number) {
-  int i, j, k;
+static MAYBE_INLINE int run_box (ARCH_WORD box_number) {
+  int i, k;
   int keys;
-
-  check_for_hits();
 
   keys = boxes[box_number].number_of_keys;
   boxes[box_number].number_of_keys = 0;
 
-  DES_bs_set_salt(boxes[box_number].salt_binary);
+  DES_bs_set_salt(box_number);
 
   for (i = 0; i < keys; i++)
     DES_bs_set_key(boxes[box_number].keys[i], i);
@@ -228,23 +166,31 @@ static MAYBE_INLINE int run_box (int box_number) {
      most of the time is spent */
   DES_bs_crypt_25(keys);
 
-  i = 0;
- next:
-  for (/* i = 0 */; i < ciphers.length; i++)
-    for (j = 0; j < HIDDEN_POSSIBILITIES; j++)
-      if (DES_bs_cmp_all(ciphers.array[i].binaries[j], 32))
-	for (k = 0; k < keys; k++)
-	  if (DES_bs_cmp_one(ciphers.array[i].binaries[j], 64, k)) {
-	    handle_hit(boxes[box_number].keys[k], i);
-	    i++; goto next;
-	  }
+  /* set the first character of the DEScrypt output
+     to '.', this character is not part of the tripcode. */
+  memset(DES_bs_all.B[ 7], 0, sizeof(DES_bs_vector));
+  memset(DES_bs_all.B[15], 0, sizeof(DES_bs_vector));
+  memset(DES_bs_all.B[23], 0, sizeof(DES_bs_vector));
+  memset(DES_bs_all.B[39], 0, sizeof(DES_bs_vector));
+  memset(DES_bs_all.B[47], 0, sizeof(DES_bs_vector));
+  memset(DES_bs_all.B[55], 0, sizeof(DES_bs_vector));
+
+  for (i = 0; i < ciphers.length; i++)
+    if (DES_bs_cmp_all(ciphers.array[i].binary, keys))
+      for (k = 0; k < keys; k++)
+	if (DES_bs_cmp_one(ciphers.array[i].binary, 64, k)) {
+	  handle_hit(boxes[box_number].keys[k], i);
+	  break;
+	}
   /* good guess */
+
+  counter += keys;
 
   return 0;
 }
 
 static MAYBE_INLINE int run_key (const char key[9], char salt[14], size_t keylen) {
-  int hash;
+  ARCH_WORD hash;
   int index;
 
   memset(salt, 'H', 2);
@@ -260,10 +206,7 @@ static MAYBE_INLINE int run_key (const char key[9], char salt[14], size_t keylen
     break;
   }
 
-  hash = SALT_HASH(salt);
-
-  if (!boxes[hash].salt_binary)
-    boxes[hash].salt_binary = DES_raw_get_salt(salt);
+  hash = DES_raw_get_salt(salt);
 
   index = boxes[hash].number_of_keys;
   memcpy(&boxes[hash].keys[index][0], key, 8);
@@ -319,63 +262,79 @@ static int loop_file (const char * filename) {
   return 1;
 }
 
-static void divide_keyspace (int rank, int size, int indices[2]) {
-  int lower_index = BLOCK_LOW(rank, size, KEY_BLOCKS);
-
-  indices[1] = BLOCK_LOW(rank, size, 0x80);
-  indices[0] = lower_index - 0x7f * indices[1];
-}
-
-static void loop_key (char key[9]) {
-  char salt[14];
-  int indices[2];
-
-  memset(salt, '\0', 14);
-
-  divide_keyspace(mpi_rank + 1, mpi_size, indices);
-
-  while (key[6] != (char) indices[0] ||
-	 key[7] != (char) indices[1]) {
-    int i;
-
-    run_key(key, salt, strlen(key));
-
-    key[0] += 1;
-
-    for (i = 0; (key[i] == (char) 0x80) && i < 6; i++) {
-      key[i+0]  = 1;
-      key[i+1] += 1;
-    }
-  }
-}
-
 static void finalize (void) {
   int i;
 
   for (i = 0; i < NUMBER_OF_BOXES; i++)
     if (boxes[i].number_of_keys)
       run_box(i);
+}
 
-  check_for_hits();
+static void signal_handler (int signal) {
+  finalize();
+  FINALIZE_AND_EXIT(signal);
+}
+
+static void advance_once (unsigned char counters[9], size_t p) {
+  size_t i;
+
+  counters[p] += 1;
+  for (i = p; i < 8 && counters[i] == CHARSET_SIZE+1; i++) {
+    counters[i+0]  = 1;
+    counters[i+1] += 1;
+  }
+}
+
+static void advance_key (unsigned char counters[9], size_t times) {
+  while (times > 0) {
+    const size_t cs2 = CHARSET_SIZE*CHARSET_SIZE;
+    const size_t cs1 = CHARSET_SIZE;
+
+    if (times > cs2 + cs1) {
+      advance_once(counters, 2);
+      times -= cs2;
+    }
+
+    if (times > cs1) {
+      advance_once(counters, 1);
+      times -= cs1;
+    }
+
+    advance_once(counters, 0);
+    times -= 1;
+  }
+}
+
+static void loop_key (unsigned char counters[9]) {
+  char salt[14] = {0};
+  char key [9]  = {0};
+  size_t keylen =  0;
+  size_t i;
+
+  advance_key(counters, mpi_rank+1);
+
+  while (counters[8] == 0) {
+    for (i = 0; counters[i]; i++) {
+      key[i] = CHARSET[counters[i]-1];
+      keylen = i+1;
+    }
+
+    run_key(key, salt, keylen);
+    advance_key(counters, mpi_size);
+  }
 }
 
 int main (int argc, char * argv[]) {
   int i;
-  int indices[2];
-  char key[9];
+  unsigned char counters[9];
 
   MPI_Init(&argc, &argv);
 
+  signal(SIGINT,  signal_handler);
+  signal(SIGTERM, signal_handler);
+
   MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
   MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
-
-  if (mpi_size > KEY_BLOCKS) {
-    root_eprintf(mpi_rank,
-		 "Too many processes spawned.\n"
-		 "This program may only handle %d processes, see the KEY_BLOCKS macro for details.\n",
-		 KEY_BLOCKS);
-    FINALIZE_AND_FAIL;
-  }
 
   if (argc < 2) {
     root_eprintf(mpi_rank,
@@ -389,25 +348,16 @@ int main (int argc, char * argv[]) {
   DES_bs_init(0, DES_bs_cpt);
 
   read_targets(argv[1]);
-  set_cracked_handler();
 
   if (argc > 2)
     for (i = BLOCK_LOW (mpi_rank, mpi_size, argc-2);
 	 i < BLOCK_HIGH(mpi_rank, mpi_size, argc-2); i++)
       loop_file(argv[i+2]);
 
-  divide_keyspace(mpi_rank, mpi_size, indices);
+  MPI_Barrier(MPI_COMM_WORLD);
 
-  memset(key, '\0', 9);
-  key[6] = (char) indices[0];
-  key[7] = (char) indices[1];
-
-  /* pad keys so they're not terminated
-     before a non-zero character */
-  if (key[6] || key[7])
-    memset(key, 1, 6);
-
-  loop_key(key);
+  memset(counters, 0, 9);
+  loop_key(counters);
 
   finalize();
   FINALIZE_AND_SUCCEED;

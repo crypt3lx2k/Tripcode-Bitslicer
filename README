@@ -1,26 +1,28 @@
-Currently under construction, the only machine I have access to is an x86-32-sse2 so for now that is all that is supported. Due to the beautiful setup of the John the Ripper source code it will be easy to extend this to a multitude of platforms, and if my surgery on the Makefile was successful, most architectures that are supported by john the ripper is also supported by this program, but there is no way for me to tell right now.
-
-At first I intended to make a Python module out of this, mainly to use with the DictRipper project, now I'm not so sure. The main reason for this is that when it comes to tripcodes pre-computed tables are just so incredibly efficient compared to anything brute force. This might change though, I'm just unsure about it right now.
-
-My current plans for this project is to create an efficient tripcode cracker that runs on clusters, so I might try to use the multi-threading capabilities although first up comes multi-processing.
-
-Current compiling is done with
+Compile with
 $ cd src/
-$ make
-Follow the instructions from there on.
+$ make target-architecture
 
-I had to remove DOS support until I can read some docs.
-Something is bound to be broken in the makefile as well since all I did was some very crude and ugly brute surgery, I'll completely rewrite it when I have time.
+Run with
+$ mpiexec -n processes ./tripslicer target-list.txt [wordlists...]
 
-And current usage is
-$ mpiexec -n processes ./bitripper targetlist [wordlists...]
+The files with targets should have one tripcode per line.
 
-Where targetlist is a list of tripcodes (one per line 10 characters long) that you want to crack.
-You may alternatively also specify some wordlists which will be used before the main brute force search of the keyspace starts.
+This program is only fit to execute on homogeneous parallel systems, as the
+keyspace is statically divided into as-equal-as-possible sized chunks.
 
-Again, this is likely to change in the near future, I will probably have some kind of file system with targets and hits.
+Currently the program only checks tripcodes that consists of alpha-numerical
+characters, to change this change the CHARSET macro in tripslicer.c and
+recompile.
 
-Currently the main lack is in decent checkpointing, the ability to stop working and then starting to work at the exact same spot at some indeterminate time in the future.
-There is also optimization that will make the checking for hits at least 64 times faster, this would majorly increase performance, currently we create 64 different crypt hashes per tripcode since the tripcode lacks a character compared to a traditional crypt implementation, not checking for this extra character only means less work and we cut an entire for loop out of the hit checking, I just need to understand how the John BS system works at a low level.
+No communication happen between the processes, every process writes cracked
+tripcodes to their stdout, in the future it would be preferable to have a
+system that was capable of communicating cracked tripcodes between the
+processes efficiently. This however requires non-regular all-to-all
+communcation and is probably non-trivial to implement in an efficient manner.
 
-The current implementation is fit to use on massively homogeneous parallel architectures since he keyspace is statically divided, a dynamic allocation routine would be better for heterogenous parallel architectures like several different nodes working together, and could also increase performance since we could move the checking of hits from other processes to when the process receives a new search space.
+Sample output looks like this,
+74 65 61 00 00 00 00 00 => WokonZwxw2 (tea)
+
+At the beginning are the eight bytes that is used as the key for the tripcode,
+then an arrow, then tripcode itself and then inside of parenthesis is the key
+interpreted as a C string.

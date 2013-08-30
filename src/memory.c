@@ -2,7 +2,7 @@
  * This file is part of John the Ripper password cracker,
  * Copyright (c) 1996-98,2010 by Solar Designer
  *
- * Modified for BitRipper imageboard tripcode cracker.
+ * Modified for TripSlicer imageboard tripcode cracker.
  *
  * See LICENSE file for details regarding files originating
  * from John the Ripper.

@@ -1,6 +1,11 @@
 /*
  * This file is part of John the Ripper password cracker,
  * Copyright (c) 1996-2002,2005,2010,2011 by Solar Designer
+ *
+ * Modified for TripSlicer imageboard tripcode cracker.
+ *
+ * See LICENSE file for details regarding files originating
+ * from John the Ripper.
  */
 
 #include <string.h>
@@ -185,35 +190,14 @@ void DES_bs_set_key(char *key, int index)
 
 	DES_bs_all.keys_changed = 1;
 
-	if (!key[0]) goto fill8;
 	*dst = key[0];
 	*(dst + sizeof(DES_bs_vector) * 8) = key[1];
 	*(dst + sizeof(DES_bs_vector) * 8 * 2) = key[2];
-	if (!key[1]) goto fill6;
-	if (!key[2]) goto fill5;
 	*(dst + sizeof(DES_bs_vector) * 8 * 3) = key[3];
 	*(dst + sizeof(DES_bs_vector) * 8 * 4) = key[4];
-	if (!key[3]) goto fill4;
-	if (!key[4] || !key[5]) goto fill3;
 	*(dst + sizeof(DES_bs_vector) * 8 * 5) = key[5];
-	if (!key[6]) goto fill2;
 	*(dst + sizeof(DES_bs_vector) * 8 * 6) = key[6];
 	*(dst + sizeof(DES_bs_vector) * 8 * 7) = key[7];
-	return;
-fill8:
-	dst[0] = 0;
-	dst[sizeof(DES_bs_vector) * 8] = 0;
-fill6:
-	dst[sizeof(DES_bs_vector) * 8 * 2] = 0;
-fill5:
-	dst[sizeof(DES_bs_vector) * 8 * 3] = 0;
-fill4:
-	dst[sizeof(DES_bs_vector) * 8 * 4] = 0;
-fill3:
-	dst[sizeof(DES_bs_vector) * 8 * 5] = 0;
-fill2:
-	dst[sizeof(DES_bs_vector) * 8 * 6] = 0;
-	dst[sizeof(DES_bs_vector) * 8 * 7] = 0;
 }
 
 void DES_bs_set_key_LM(char *key, int index)

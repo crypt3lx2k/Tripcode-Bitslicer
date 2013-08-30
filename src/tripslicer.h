@@ -1,10 +1,10 @@
 /*
- * This file is part of BitRipper imageboard tripcode cracker,
- * Copyright (C) 2011 Truls Edvard Stokke
+ * This file is part of TripSlicer imageboard tripcode cracker,
+ * Copyright (C) 2011-2013 Truls Edvard Stokke
  */
 
-#ifndef BITRIPPER_H__
-#define BITRIPPER_H__
+#ifndef TRIPSLICER_H__
+#define TRIPSLICER_H__
 
 #include "DES_bs.h"
 
@@ -31,23 +31,4 @@ const char salt_table[] =
   "................................"
   "................................";
 
-/*
- * Minus the salt we are missing the
- * third character compared to a
- * regular DES crypt hash.
- *
- * This means we have to test for
- * every possible completion of the
- * tripcode as a DES crypt hash.
- *
- * This table provides every possible
- * completion for the third character.
- */
-const char hidden[] =
-  "./0123456789"
-  "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-  "abcdefghijklmnopqrstuvwxyz";
-
-#define HIDDEN_POSSIBILITIES (sizeof(hidden))
-
-#endif /* BITRIPPER_H__ */
+#endif /* TRIPSLICER_H__ */

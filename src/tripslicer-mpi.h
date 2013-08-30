@@ -1,11 +1,12 @@
 /*
- * This file is part of BitRipper imageboard tripcode cracker,
- * Copyright (C) 2011 Truls Edvard Stokke
+ * This file is part of TripSlicer imageboard tripcode cracker,
+ * Copyright (C) 2011-2013 Truls Edvard Stokke
  */
 
-#ifndef BITRIPPER_MPI_H__
-#define BITRIPPER_MPI_H__
+#ifndef TRIPSLICER_MPI_H__
+#define TRIPSLICER_MPI_H__
 
+#include <stdio.h>
 #include <stdlib.h>
 
 /* common */
@@ -48,4 +49,4 @@
 #define root_eprintf(id, ...) \
   root_fprintf((id), stderr, __VA_ARGS__)
 
-#endif /* BITRIPPER_MPI_H__ */
+#endif /* TRIPSLICER_MPI_H__ */
