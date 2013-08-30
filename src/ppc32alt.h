@@ -11,6 +11,7 @@
 #define _JOHN_ARCH_H
 
 #define ARCH_WORD			int
+#define ARCH_WORD_MPI			MPI_INT
 #define ARCH_SIZE			4
 #define ARCH_BITS			32
 #define ARCH_BITS_LOG			5

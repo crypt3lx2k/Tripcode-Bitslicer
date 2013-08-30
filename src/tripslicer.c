@@ -4,6 +4,7 @@
  */
 
 #include <signal.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -52,7 +53,7 @@ static struct {
 } CC_CACHE_ALIGN boxes[NUMBER_OF_BOXES];
 
 static struct {
-  struct {
+  struct cipher {
     /*
      * The magic number 2 here comes from
      * line 1077, 1088 in DES_std.c:
@@ -61,71 +62,102 @@ static struct {
      *   return out;
      */
     ARCH_WORD binary[2];
-    char text[11];
+    char text[10];
   } CC_CACHE_ALIGN array[MAX_CIPHERS];
 
   int length;
 } ciphers;
 
 static int read_targets (char * filename) {
-  char io_buffer[IO_BUFFER_SIZE];
-  FILE * targets = fopen(filename, "r");
+  MPI_Datatype cipher_type;
 
-  if (targets == NULL) {
-    root_eprintf(mpi_rank,
-		 "unable to open targetlist %s\n",
-		 filename);
-    FINALIZE_AND_FAIL;
-  }
+  int block_lengths[2];
+  MPI_Aint displacements[2];
+  MPI_Datatype types[2];
 
-  memset(io_buffer, '\0', IO_BUFFER_SIZE);
+  /* ARCH_WORD binary[2] */
+  block_lengths[0] = 2;
+  /* char text[10] */
+  block_lengths[1] = 10;
 
-  while (fgets(io_buffer, IO_BUFFER_SIZE, targets)) {
-    size_t input_length;
-    char ciphertext[14];
-    ARCH_WORD * binary;
+  displacements[0] = offsetof(struct cipher, binary);
+  displacements[1] = offsetof(struct cipher, text);
 
-    if (ciphers.length == MAX_CIPHERS) {
-      root_eprintf(mpi_rank,
-		   "too many targets, can only handle %d\n",
-		   MAX_CIPHERS);
-      FINALIZE_AND_FAIL;
+  types[0] = ARCH_WORD_MPI;
+  types[1] = MPI_CHAR;
+
+  MPI_Type_create_struct(2, block_lengths, displacements,
+			 types, &cipher_type);
+  MPI_Type_commit(&cipher_type);
+
+  /* root process reads file. */
+  if (PROCESS_IS_ROOT(mpi_rank)) {
+    char io_buffer[IO_BUFFER_SIZE];
+    FILE * targets;
+
+    targets = fopen(filename, "r");
+
+    if (targets == NULL) {
+      fprintf(stderr, "unable to open targetlist %s\n",
+	      filename);
+      MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
     }
 
-    if (io_buffer[0] == '\0')
-      continue;
+    memset(io_buffer, '\0', IO_BUFFER_SIZE);
 
-    input_length = strlen(io_buffer);
+    while (fgets(io_buffer, IO_BUFFER_SIZE, targets)) {
+      size_t input_length;
+      char ciphertext[14];
+      ARCH_WORD * binary;
 
-    while (input_length &&
-	   (io_buffer[input_length - 1] == '\n' ||
-	    io_buffer[input_length - 1] == '\r'))
-      io_buffer[--input_length] = '\0';
+      if (ciphers.length == MAX_CIPHERS) {
+	root_eprintf(mpi_rank,
+		     "too many targets, can only handle %d\n",
+		     MAX_CIPHERS);
+	FINALIZE_AND_FAIL;
+      }
 
-    /* does not clearing the buffer
-       here have any effect? */
-    if (input_length < 10) {
-      root_eprintf(mpi_rank,
-		   "illegal line: %s in target file %s\n",
-		   io_buffer, filename);
-      continue;
+      if (io_buffer[0] == '\0')
+	continue;
+
+      input_length = strlen(io_buffer);
+
+      while (input_length &&
+	     (io_buffer[input_length - 1] == '\n' ||
+	      io_buffer[input_length - 1] == '\r'))
+	io_buffer[--input_length] = '\0';
+
+      /* does not clearing the buffer
+	 here have any effect? */
+      if (input_length < 10) {
+	root_eprintf(mpi_rank,
+		     "illegal line: %s in target file %s\n",
+		     io_buffer, filename);
+	continue;
+      }
+
+      strncat(&ciphers.array[ciphers.length].text[0],
+	      io_buffer, 10);
+
+      memset(ciphertext, 0, 14);
+      memset(ciphertext, '.', 3);
+      memcpy(ciphertext + 3, io_buffer, 10);
+
+      binary = DES_bs_get_binary(ciphertext);
+      ciphers.array[ciphers.length].binary[0] = binary[0];
+      ciphers.array[ciphers.length].binary[1] = binary[1];
+
+      ciphers.length += 1;
+
+      memset(io_buffer, '\0', input_length);
     }
-
-    strncat(&ciphers.array[ciphers.length].text[0],
-	    io_buffer, 10);
-
-    memset(ciphertext, 0, 14);
-    memset(ciphertext, '.', 3);
-    memcpy(ciphertext + 3, io_buffer, 10);
-
-    binary = DES_bs_get_binary(ciphertext);
-    ciphers.array[ciphers.length].binary[0] = binary[0];
-    ciphers.array[ciphers.length].binary[1] = binary[1];
-
-    ciphers.length += 1;
-
-    memset(io_buffer, '\0', input_length);
   }
+
+  /* root process broadcasts ciphers to children. */
+  MPI_Bcast(&ciphers.length, 1, MPI_INT,
+	    ROOT_PROCESS, MPI_COMM_WORLD);
+  MPI_Bcast(&ciphers, ciphers.length, cipher_type,
+	    ROOT_PROCESS, MPI_COMM_WORLD);
 
   if (ciphers.length == 0) {
     root_eprintf(mpi_rank,
@@ -133,12 +165,14 @@ static int read_targets (char * filename) {
     FINALIZE_AND_FAIL;
   }
 
+  MPI_Type_free(&cipher_type);
+
   return ciphers.length;
 }
 
 static MAYBE_INLINE void handle_hit (char * key, int cipher) {
   printf("%02x %02x %02x %02x "
-  	 "%02x %02x %02x %02x => %s (%.8s)\n",
+  	 "%02x %02x %02x %02x => %.10s (%.8s)\n",
   	 (unsigned) key[0], (unsigned) key[1],
   	 (unsigned) key[2], (unsigned) key[3],
   	 (unsigned) key[4], (unsigned) key[5],
