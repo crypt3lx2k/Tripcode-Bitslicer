@@ -37,8 +37,6 @@ static int mpi_rank;
    in MPI_COMM_WORLD */
 static int mpi_size;
 
-static unsigned long int counter = 0;
-
 /*
  * With bitslicing DES we want to run as many
  * keys as possible at the same time, but we
@@ -183,8 +181,6 @@ static MAYBE_INLINE int run_box (ARCH_WORD box_number) {
 	  break;
 	}
   /* good guess */
-
-  counter += keys;
 
   return 0;
 }
