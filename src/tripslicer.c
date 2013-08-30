@@ -63,7 +63,7 @@ static struct {
      */
     ARCH_WORD binary[2];
     char text[10];
-  } CC_CACHE_ALIGN array[MAX_CIPHERS];
+  } array[MAX_CIPHERS];
 
   int length;
 } ciphers;
@@ -156,7 +156,7 @@ static int read_targets (char * filename) {
   /* root process broadcasts ciphers to children. */
   MPI_Bcast(&ciphers.length, 1, MPI_INT,
 	    ROOT_PROCESS, MPI_COMM_WORLD);
-  MPI_Bcast(&ciphers, ciphers.length, cipher_type,
+  MPI_Bcast(&ciphers.array, ciphers.length, cipher_type,
 	    ROOT_PROCESS, MPI_COMM_WORLD);
 
   if (ciphers.length == 0) {
