@@ -184,37 +184,44 @@ static MAYBE_INLINE void handle_hit (char * key, int cipher) {
 
 static MAYBE_INLINE int run_box (ARCH_WORD box_number) {
   int i, k;
-  int keys;
+  int level;
+  int total_keys;
 
-  keys = boxes[box_number].number_of_keys;
+  total_keys = boxes[box_number].number_of_keys;
   boxes[box_number].number_of_keys = 0;
 
   DES_bs_set_salt(box_number);
 
-  for (i = 0; i < keys; i++)
-    DES_bs_set_key(boxes[box_number].keys[i], i);
+  for (level = 0; total_keys; level++) {
+    int keys = total_keys > DES_BS_DEPTH ? DES_BS_DEPTH : total_keys;
 
-  /* just try to guess where
-     most of the time is spent */
-  DES_bs_crypt_25(keys);
+    total_keys -= keys;
 
-  /* set the first character of the DEScrypt output
-     to '.', this character is not part of the tripcode. */
-  memset(DES_bs_all.B[ 7], 0, sizeof(DES_bs_vector));
-  memset(DES_bs_all.B[15], 0, sizeof(DES_bs_vector));
-  memset(DES_bs_all.B[23], 0, sizeof(DES_bs_vector));
-  memset(DES_bs_all.B[39], 0, sizeof(DES_bs_vector));
-  memset(DES_bs_all.B[47], 0, sizeof(DES_bs_vector));
-  memset(DES_bs_all.B[55], 0, sizeof(DES_bs_vector));
+    for (i = 0; i < keys; i++)
+      DES_bs_set_key(boxes[box_number].keys[DES_BS_DEPTH*level+i], i);
 
-  for (i = 0; i < ciphers.length; i++)
-    if (DES_bs_cmp_all(ciphers.array[i].binary, keys))
-      for (k = 0; k < keys; k++)
-	if (DES_bs_cmp_one(ciphers.array[i].binary, 64, k)) {
-	  handle_hit(boxes[box_number].keys[k], i);
-	  break;
-	}
-  /* good guess */
+    /* just try to guess where
+       most of the time is spent */
+    DES_bs_crypt_25(keys);
+
+    /* set the first character of the DEScrypt output
+       to '.', this character is not part of the tripcode. */
+    memset(DES_bs_all.B[ 7], 0, sizeof(DES_bs_vector));
+    memset(DES_bs_all.B[15], 0, sizeof(DES_bs_vector));
+    memset(DES_bs_all.B[23], 0, sizeof(DES_bs_vector));
+    memset(DES_bs_all.B[39], 0, sizeof(DES_bs_vector));
+    memset(DES_bs_all.B[47], 0, sizeof(DES_bs_vector));
+    memset(DES_bs_all.B[55], 0, sizeof(DES_bs_vector));
+
+    for (i = 0; i < ciphers.length; i++)
+      if (DES_bs_cmp_all(ciphers.array[i].binary, keys))
+	for (k = 0; k < keys; k++)
+	  if (DES_bs_cmp_one(ciphers.array[i].binary, 64, k)) {
+	    handle_hit(boxes[box_number].keys[DES_BS_DEPTH*level+k], i);
+	    break;
+	  }
+    /* good guess */
+  }
 
   return 0;
 }
